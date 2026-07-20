@@ -1,34 +1,65 @@
 # 02GeoQuest — Playable Map Studio
 
-Turn a QGIS vector layer into a geography game, teaching activity, data-familiarisation exercise or public-engagement quest.
+Turn any QGIS vector dataset into an interactive geography game, teaching activity, data-familiarisation exercise, or public engagement quest.
 
-## What you can play
+---
 
-- **Map Hunt:** find a requested feature directly on the live QGIS canvas.
-- **Value Duel:** choose the feature with the larger numeric value or ground area.
-- **Distance Guess:** estimate the distance between two named places.
-- **Know the Shape:** recognise a polygon from its silhouette.
+## 🎮 What You Can Play (8 Modes)
 
-The quest builder lets you choose the source layer, label and numeric fields, mode mix, round count and lives. Sessions include speed bonuses, streaks, accuracy, lives and a persistent local leaderboard.
+- 📍 **Map Hunt:** Find requested features directly on the live QGIS map canvas.
+- ⚖️ **Value Duel:** Compare two features to determine which has the larger numeric value or area.
+- 📏 **Distance Guess:** Estimate the geographic distance between two places.
+- 🧩 **Know the Shape:** Identify a feature from its antialiased polygon silhouette.
+- 🎯 **Attribute Guess:** Estimate a numeric attribute using a slider control.
+- 📊 **Ranking:** Order 3–4 features from highest to lowest value via drag-and-drop.
+- 🧭 **Nearest Neighbour:** Determine which feature is geographically closest to a reference location.
+- 🔍 **Blind Zoom:** Identify a feature when the map canvas automatically zooms to it.
 
-## Share without a server
+---
 
-Export the current quest as one self-contained HTML file. The file includes its visual design, question data and game engine; it works offline in a modern browser and uses no CDN, account, API or tracking service.
+## ⚡ Game Features & Rules
 
-## Quick start
+- **Difficulty Levels:** Easy (60s timer, 3 choices), Medium (30s timer, 4 choices), and Hard (15s timer, 6 choices).
+- **Joker System:** Use up to 3 jokers per quest (Eliminate options, Value Range Hint, or Map Region Hint).
+- **Multi-Layer Mixing:** Combine two vector layers into a single mixed quest.
+- **Streak & Speed Bonuses:** Build multiplier streaks (🔥 ×3+) for high score bonuses.
+- **Visual Feedback:** Live canvas highlighting, pulse effects, and interactive feedback.
 
-1. Open **02GeoQuest** from its toolbar button.
-2. Choose a vector layer and a field containing readable place names.
-3. Optionally choose a numeric field for Value Duel.
-4. Select the game modes and rules, then press **Start the quest**.
-5. Use **Share** to produce the standalone web edition.
+---
 
-Polygon layers support all four modes. Point and line layers support Map Hunt, Value Duel and Distance Guess. A quest needs at least four non-empty features; web exports include at most the first 500 playable features to remain portable.
+## 🎓 Class Mode & Student Profiles
 
-## Privacy and dependencies
+- **Student Profiles:** Create and manage profiles with customizable avatars.
+- **Session History:** Track individual quiz scores, accuracy percentages, and completion times.
+- **CSV Export:** Export all classroom session records to a structured `.csv` report.
 
-02GeoQuest runs locally inside QGIS. It sends no layer data over the network and requires no external Python packages. It supports QGIS 3.34–4.x through `qgis.PyQt` and scoped Qt enums.
+---
 
-## License
+## 🌐 Serverless Web Export
+
+Export any quest into a single, self-contained HTML file:
+- **Offline & Private:** Zero external network calls, zero CDNs, no tracking, works completely offline.
+- **Responsive & Dark Mode:** Built-in dark mode toggle, smooth animations, and progress indicator dots.
+
+---
+
+## 🚀 Quick Start
+
+1. Open **02GeoQuest** from its QGIS toolbar button.
+2. Select your vector layer(s) and readable label/numeric fields.
+3. Choose your difficulty level, game modes, and quest rules.
+4. Click **Start the quest** to play in QGIS, or **Export standalone HTML** to share.
+
+---
+
+## 🔒 Privacy & Compatibility
+
+- Runs 100% locally inside QGIS (QGIS 3.34 – 4.x).
+- Requires no third-party Python packages.
+- Dual Qt 5/6 & PyQt 5/6 compatibility.
+
+---
+
+## 📜 License
 
 GPL-3.0-or-later. Copyright © 2026 Yusuf Eminoglu.

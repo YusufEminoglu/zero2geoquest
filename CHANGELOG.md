@@ -1,5 +1,9 @@
 # Changelog
 
+## [1.0.1] - 2026-07-20
+
+- Docs update: comprehensive README for 8 game modes, class mode, jokers, difficulty levels, and HTML web export
+
 ## [1.0.0] - 2026-07-20
 
 - Major release: 8 game modes, countdown timer, joker system, difficulty levels, multi-layer support, class mode with profiles, premium HTML export with dark mode

@@ -90,8 +90,10 @@ def _game_engine():
     # GameSession
     session = GameSession(list(MODES), round_limit=5, lives=3,
                           difficulty="Hard", joker_count=3)
+    session.next_mode()
     assert session.timer_seconds == 15
     result = session.answer(True)
+    session.next_mode()
     assert result["score"] > 0
     result2 = session.answer(False)
     assert result2["lives"] == 2
@@ -115,7 +117,9 @@ def _exporter():
     from zero2geoquest.core.exporter import build_html
     records = [
         {"fid": 1, "label": "Alpha", "value": 100.0, "area": 50.0,
-         "centroid": [28.0, 41.0], "bbox_wgs84": [27.9, 40.9, 28.1, 41.1], "outline": []}
+         "centroid": [28.0, 41.0], "bbox_wgs84": [27.9, 40.9, 28.1, 41.1], "outline": []},
+        {"fid": 2, "label": "Beta", "value": 120.0, "area": 60.0,
+         "centroid": [29.0, 41.0], "bbox_wgs84": [28.9, 40.9, 29.1, 41.1], "outline": []},
     ]
     html = build_html("Test Quest", records, ["bigger"], 5)
     assert "<html" in html

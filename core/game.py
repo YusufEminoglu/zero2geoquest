@@ -23,7 +23,70 @@ DIFFICULTY: dict[str, dict] = {
     "Hard":   {"timer": 15, "choices": 6, "tolerance": 0.10},
 }
 
+
+def display_records(records: list[dict]) -> list[dict]:
+    """Copy records and give duplicate feature labels unambiguous display names."""
+    copied = [dict(record) for record in records]
+    counts: dict[str, int] = {}
+    for record in copied:
+        label = str(record.get("label") or f"Feature {record.get('fid', '?')}")
+        counts[label] = counts.get(label, 0) + 1
+
+    used: set[str] = set()
+    for index, record in enumerate(copied, 1):
+        label = str(record.get("label") or f"Feature {record.get('fid', '?')}")
+        if counts[label] > 1:
+            layer_name = str(record.get("layer_name") or "Layer")
+            label = f"{label} ({layer_name} #{record.get('fid', '?')})"
+        candidate = label
+        suffix = 2
+        while candidate in used:
+            candidate = f"{label} [{index}-{suffix}]"
+            suffix += 1
+        record["display_label"] = candidate
+        used.add(candidate)
+    return copied
+
+
+def _record_key(record: dict) -> tuple[str, str]:
+    """Return a stable identity that remains unique across mixed layers."""
+    return str(record.get("layer_id", "")), int(record.get("fid", -1))
+
+
+def _number(value) -> float | None:
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return None
+    return number if math.isfinite(number) else None
+
+
+def _comparison_value(record: dict) -> float | None:
+    value = _number(record.get("value"))
+    return value if value is not None else _number(record.get("area"))
+
 # ── LCG (non-cryptographic) ──────────────────────────────────────────────────
+
+def _centroid(record: dict) -> tuple[float, float] | None:
+    """Return a finite WGS84 centroid, or ``None`` for unusable records."""
+    point = record.get("centroid")
+    if not isinstance(point, (list, tuple)) or len(point) < 2:
+        return None
+    lon, lat = _number(point[0]), _number(point[1])
+    if lon is None or lat is None:
+        return None
+    return lon, lat
+
+
+def _has_outline(record: dict) -> bool:
+    """True when a record can render a polygon silhouette."""
+    outline = record.get("outline")
+    return isinstance(outline, (list, tuple)) and len(outline) >= 3
+
+
+def _numbers_are_distinct(first: float, second: float) -> bool:
+    """Reject ties without making large values accidentally equal."""
+    return not math.isclose(first, second, rel_tol=1e-12, abs_tol=1e-12)
 
 
 class LCG:
@@ -105,7 +168,8 @@ class Joker:
 
 
 def _label(record: dict) -> str:
-    return str(record.get("label") or f"Feature {record.get('fid', '?')}")
+    return str(record.get("display_label") or record.get("label")
+               or f"Feature {record.get('fid', '?')}")
 
 
 def _distance_m(a: dict, b: dict) -> float:
@@ -124,17 +188,86 @@ class QuestionFactory:
     """Build varied, non-repeating questions from serialisable records."""
 
     def __init__(self, records: list[dict], seed: int | None = None):
-        self.records = [dict(r) for r in records]
+        self.records = display_records(records)
         self.rng = LCG(seed)
         self._recent: list[tuple] = []
 
+    def _value_pairs(self) -> list[tuple[dict, dict, float, float]]:
+        """Return every non-tied pair usable by Value Duel."""
+        candidates = [
+            (record, value) for record in self.records
+            if (value := _comparison_value(record)) is not None
+        ]
+        return [
+            (first, second, first_value, second_value)
+            for index, (first, first_value) in enumerate(candidates)
+            for second, second_value in candidates[index + 1:]
+            if _numbers_are_distinct(first_value, second_value)
+        ]
+
+    def _distance_pairs(self) -> list[tuple[dict, dict]]:
+        """Return feature pairs with valid, non-zero geographic separation."""
+        valid_records = [record for record in self.records if _centroid(record) is not None]
+        return [
+            (first, second)
+            for index, first in enumerate(valid_records)
+            for second in valid_records[index + 1:]
+            if _distance_m(first, second) > 0.01
+        ]
+
+    def _nearest_options(self) -> list[tuple[dict, list[dict]]]:
+        """Return references whose nearest candidate is objectively unique."""
+        valid_records = [record for record in self.records if _centroid(record) is not None]
+        options: list[tuple[dict, list[dict]]] = []
+        for reference in valid_records:
+            ranked = sorted(
+                ((_distance_m(reference, record), record) for record in valid_records
+                 if _record_key(record) != _record_key(reference)),
+                key=lambda item: item[0])
+            if len(ranked) < 4 or ranked[0][0] <= 0.01:
+                continue
+            if _numbers_are_distinct(ranked[0][0], ranked[1][0]):
+                options.append((reference, [record for _, record in ranked]))
+        return options
+
+
+    def available_modes(self, modes: list[str] | tuple[str, ...] | None = None) -> list[str]:
+        """Return modes with enough valid data to create a fair question."""
+        candidates = MODES if modes is None else modes
+        valued = [record for record in self.records if _number(record.get("value")) is not None]
+        value_pairs = self._value_pairs()
+        distance_pairs = self._distance_pairs()
+        nearest_options = self._nearest_options()
+        unique_values = {_number(record.get("value")) for record in valued}
+        silhouette_count = sum(_has_outline(record) for record in self.records)
+        available: list[str] = []
+        for mode in candidates:
+            if mode == "locate" and self.records:
+                available.append(mode)
+            elif mode == "bigger" and value_pairs:
+                available.append(mode)
+            elif mode == "distance" and distance_pairs:
+                available.append(mode)
+            elif mode == "silhouette" and silhouette_count >= 4:
+                available.append(mode)
+            elif mode == "attr_guess" and len(unique_values) >= 2:
+                available.append(mode)
+            elif mode == "ordering" and len(unique_values) >= 3:
+                available.append(mode)
+            elif mode == "nearest" and nearest_options:
+                available.append(mode)
+            elif mode == "blind_zoom" and len(self.records) >= 2:
+                available.append(mode)
+        return available
+
     def _sample(self, count: int, pool: list[dict] | None = None) -> list[dict]:
+
         source = self.records if pool is None else pool
         if len(source) < count:
             raise ValueError(f"At least {count} features are required for this mode.")
         for _ in range(25):
             picked = self.rng.sample(source, count)
-            sig = tuple(sorted(r["fid"] for r in picked))
+            sig = tuple(sorted(_record_key(r) for r in picked))
             if sig not in self._recent:
                 self._recent = (self._recent + [sig])[-8:]
                 return picked
@@ -152,16 +285,18 @@ class QuestionFactory:
                 "mode": mode,
                 "prompt": f"Find {_label(target)} on the map",
                 "target_fid": target["fid"],
+                "target_layer_id": target.get("layer_id"),
                 "answer": _label(target),
                 "target_bbox_wgs84": target.get("bbox_wgs84", []),
             }
 
         # ── bigger ───────────────────────────────────────────────────────────
         if mode == "bigger":
-            a, b = self._sample(2)
-            av = float(a.get("value") if a.get("value") is not None else a.get("area", 0))
-            bv = float(b.get("value") if b.get("value") is not None else b.get("area", 0))
-            winner = a if av >= bv else b
+            pairs = self._value_pairs()
+            if not pairs:
+                raise ValueError("Value Duel requires at least two different numeric values.")
+            a, b, av, bv = self.rng.choice(pairs)
+            winner = a if av > bv else b
             return {
                 "mode": mode,
                 "prompt": "Which one has the greater value?",
@@ -172,7 +307,10 @@ class QuestionFactory:
 
         # ── distance ─────────────────────────────────────────────────────────
         if mode == "distance":
-            a, b = self._sample(2)
+            pairs = self._distance_pairs()
+            if not pairs:
+                raise ValueError("Distance Guess requires two distinct feature locations.")
+            a, b = self.rng.choice(pairs)
             metres = _distance_m(a, b)
             return {
                 "mode": mode,
@@ -186,7 +324,7 @@ class QuestionFactory:
 
         # ── silhouette ───────────────────────────────────────────────────────
         if mode == "silhouette":
-            pool = [r for r in self.records if r.get("outline")]
+            pool = [record for record in self.records if _has_outline(record)]
             if len(pool) < 4:
                 raise ValueError("Silhouette mode requires at least 4 polygon features.")
             choices_pool = self.rng.sample(pool, min(n_choices, len(pool)))
@@ -202,50 +340,57 @@ class QuestionFactory:
 
         # ── attr_guess ───────────────────────────────────────────────────────
         if mode == "attr_guess":
-            valued = [r for r in self.records if r.get("value") is not None]
-            if len(valued) < 2:
-                raise ValueError("Attribute Guess requires at least 2 features with a numeric field.")
+            valued = [record for record in self.records if _number(record.get("value")) is not None]
+            all_values = [_number(record["value"]) for record in valued]
+            if len(set(all_values)) < 2:
+                raise ValueError("Attribute Guess requires at least two different numeric values.")
             target = self._sample(1, pool=valued)[0]
-            all_values = [float(r["value"]) for r in valued]
             min_v, max_v = min(all_values), max(all_values)
             return {
                 "mode": mode,
                 "prompt": f"Estimate the value of: {_label(target)}",
                 "target_fid": target["fid"],
-                "answer": float(target["value"]),
+                "answer": _number(target["value"]),
                 "min_val": min_v,
                 "max_val": max_v,
                 "tolerance": tolerance,
+                "tolerance_scale": max(1.0, max_v - min_v),
             }
 
         # ── ordering ─────────────────────────────────────────────────────────
         if mode == "ordering":
-            valued = [r for r in self.records if r.get("value") is not None]
-            count = min(4, len(valued))
+            valued = [r for r in self.records if _number(r.get("value")) is not None]
+            by_value: dict[float, list[dict]] = {}
+            for record in valued:
+                value = _number(record["value"])
+                by_value.setdefault(value, []).append(record)
+            count = min(4, len(by_value))
             if count < 3:
-                raise ValueError("Ordering mode requires at least 3 features with a numeric field.")
-            items = self._sample(count, pool=valued)
+                raise ValueError("Ranking requires at least 3 different numeric values.")
+            values = self.rng.sample(list(by_value), count)
+            items = [self.rng.choice(by_value[value]) for value in values]
             sorted_labels = [_label(r) for r in sorted(items,
-                             key=lambda r: float(r.get("value") or 0), reverse=True)]
+                             key=lambda r: _number(r.get("value")), reverse=True)]
             shuffled = self.rng.shuffled(items)
             return {
                 "mode": mode,
                 "prompt": "Rank these from highest to lowest value",
                 "items": [{"label": _label(r), "fid": r["fid"],
-                            "value": float(r.get("value") or 0)} for r in shuffled],
+                            "value": _number(r.get("value"))} for r in shuffled],
                 "answer": sorted_labels,
             }
 
         # ── nearest ──────────────────────────────────────────────────────────
         if mode == "nearest":
-            if len(self.records) < 5:
-                raise ValueError("Nearest Neighbor requires at least 5 features.")
-            pool = self._sample(5)
-            reference = pool[0]
-            candidates = pool[1:]
-            nearest = min(candidates,
-                          key=lambda r: _distance_m(reference, r))
-            choices = self.rng.shuffled([_label(r) for r in candidates])
+            options = self._nearest_options()
+            if not options:
+                raise ValueError("Nearest Neighbor requires a unique closest feature.")
+            reference, ranked_records = self.rng.choice(options)
+            choice_count = min(max(2, n_choices), len(ranked_records))
+            nearest = ranked_records[0]
+            candidates = [nearest] + self.rng.sample(
+                ranked_records[1:], choice_count - 1)
+            choices = self.rng.shuffled([_label(record) for record in candidates])
             return {
                 "mode": mode,
                 "prompt": f"Which feature is closest to {_label(reference)}?",
@@ -258,7 +403,7 @@ class QuestionFactory:
         # ── blind_zoom ───────────────────────────────────────────────────────
         if mode == "blind_zoom":
             target = self._sample(1)[0]
-            decoy_pool = [r for r in self.records if r["fid"] != target["fid"]]
+            decoy_pool = [r for r in self.records if _record_key(r) != _record_key(target)]
             decoys = self.rng.sample(decoy_pool, min(n_choices - 1, len(decoy_pool)))
             choices = self.rng.shuffled([_label(target)] + [_label(r) for r in decoys])
             return {
@@ -268,6 +413,7 @@ class QuestionFactory:
                 "answer": _label(target),
                 "target_fid": target["fid"],
                 "bbox_wgs84": target.get("bbox_wgs84", []),
+                "target_layer_id": target.get("layer_id"),
             }
 
         raise ValueError(f"Unknown game mode: {mode!r}")
@@ -294,11 +440,12 @@ class GameSession:
         self.best_streak = 0
         self.rounds = 0
         self.correct = 0
-        self.difficulty = difficulty
+        self.difficulty = difficulty if difficulty in DIFFICULTY else "Medium"
         self.joker = Joker(max(0, int(joker_count)))
         self.rng = LCG(seed)
         self.started_at = time.monotonic()
         self.question_started_at = self.started_at
+        self._awaiting_answer = False
 
     @property
     def finished(self) -> bool:
@@ -312,14 +459,34 @@ class GameSession:
     def timer_seconds(self) -> int:
         return DIFFICULTY.get(self.difficulty, DIFFICULTY["Medium"])["timer"]
 
+    @property
+    def awaiting_answer(self) -> bool:
+        """Whether one active challenge may still be answered."""
+        return self._awaiting_answer and not self.finished
+
     def next_mode(self) -> str:
+        if self.finished:
+            raise RuntimeError("The quest has already finished.")
+        if self._awaiting_answer:
+            raise RuntimeError("Answer the current challenge before requesting another one.")
         self.question_started_at = time.monotonic()
+        self._awaiting_answer = True
         return self.rng.choice(self.modes)
 
     def answer(self, is_correct: bool, elapsed: float | None = None,
                closeness: float = 1.0) -> dict:
-        seconds = max(0.0, (time.monotonic() - self.question_started_at)
-                      if elapsed is None else float(elapsed))
+        if self.finished:
+            raise RuntimeError("The quest has already finished.")
+        if not self._awaiting_answer:
+            raise RuntimeError("Start a challenge before submitting an answer.")
+        seconds = ((time.monotonic() - self.question_started_at)
+                   if elapsed is None else _number(elapsed))
+        seconds = max(0.0, seconds if seconds is not None else 0.0)
+        timed_out = seconds >= self.timer_seconds
+        is_correct = bool(is_correct) and not timed_out
+        closeness = _number(closeness)
+        closeness = max(0.25, closeness if closeness is not None else 0.25)
+        self._awaiting_answer = False
         self.rounds += 1
         gained = 0
         if is_correct:
@@ -328,15 +495,16 @@ class GameSession:
             self.best_streak = max(self.best_streak, self.streak)
             speed_bonus = max(0, 150 - int(seconds * 8))
             streak_bonus = min(300, max(0, self.streak - 1) * 30)
-            gained = int((500 + speed_bonus + streak_bonus) * max(0.25, closeness))
+            gained = int((500 + speed_bonus + streak_bonus) * closeness)
             self.score += gained
         else:
             self.streak = 0
             self.lives -= 1
         return {
-            "correct": bool(is_correct), "gained": gained, "score": self.score,
+            "correct": is_correct, "gained": gained, "score": self.score,
             "streak": self.streak, "lives": self.lives, "rounds": self.rounds,
             "finished": self.finished,
+            "timed_out": timed_out,
         }
 
     def summary(self) -> dict:

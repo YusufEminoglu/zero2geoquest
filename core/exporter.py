@@ -5,8 +5,15 @@ import html
 import json
 from pathlib import Path
 
+from .game import QuestionFactory
+
+def available_html_modes(records: list[dict], modes: list[str]) -> list[str]:
+    """Return selected offline-capable modes that have fair source data."""
+    selected = list(dict.fromkeys(mode for mode in modes if mode in HTML_MODES))
+    return QuestionFactory(records).available_modes(selected)
+
 # Modes supported in offline HTML (locate and blind_zoom need QGIS canvas)
-_HTML_MODES = {"bigger", "distance", "silhouette", "attr_guess", "nearest"}
+HTML_MODES = ("bigger", "distance", "silhouette", "attr_guess", "ordering", "nearest")
 
 
 def _safe_json(value) -> str:
@@ -16,10 +23,19 @@ def _safe_json(value) -> str:
 def build_html(title: str, records: list[dict], modes: list[str],
                rounds: int) -> str:
     """Return a self-contained HTML quiz. locate and blind_zoom are excluded."""
-    active_modes = [m for m in modes if m in _HTML_MODES] or list(_HTML_MODES)[:2]
+    factory = QuestionFactory(records)
+    selected_modes = list(dict.fromkeys(mode for mode in modes if mode in HTML_MODES))
+    active_modes = factory.available_modes(selected_modes)
+    if not active_modes:
+        raise ValueError(
+            "Offline HTML needs at least one selected, data-ready mode: Value Duel, "
+            "Distance Guess, Know the Shape, Attribute Guess, Ranking, or Nearest Neighbour.")
+    export_records = [
+        {**record, "label": str(record["display_label"])} for record in factory.records
+    ]
     payload = {
         "title": title,
-        "records": records,
+        "records": export_records,
         "modes": active_modes,
         "rounds": max(1, int(rounds)),
     }
@@ -71,6 +87,11 @@ button:disabled{{opacity:.55;cursor:default;transform:none}}
 [data-theme=dark] #timer-bar{{background:#1e293b}}
 .slider-wrap{{padding:8px 0 16px}}
 input[type=range]{{width:100%;accent-color:var(--violet);height:6px;cursor:pointer}}
+.rank-list{{display:grid;gap:8px;margin:8px 0 16px}}
+.rank-row{{display:flex;align-items:center;gap:10px;padding:10px 12px;border:1px solid #d7dfeb;border-radius:12px;background:var(--paper)}}
+.rank-label{{flex:1;font-weight:700}}
+.rank-move{{padding:6px 10px;border-radius:9px;min-width:36px;text-align:center}}
+[data-theme=dark] .rank-row{{border-color:#334155}}
 .slider-val{{text-align:center;font-size:28px;font-weight:900;color:var(--violet);margin-bottom:12px}}
 .slider-hint{{display:flex;justify-content:space-between;color:var(--muted);font-size:12px}}
 #feedback{{min-height:52px;font-size:17px;font-weight:700;margin:14px 0;padding:12px 16px;border-radius:12px;display:none}}
@@ -146,6 +167,16 @@ function LCG_next(){{lcg_state=(1664525*lcg_state+1013904223)>>>0;return lcg_sta
 function shuffled(a){{let r=[...a];for(let i=r.length-1;i>0;i--){{let j=LCG_next()%(i+1);[r[i],r[j]]=[r[j],r[i]]}};return r;}}
 function sample(pool,n){{return shuffled(pool).slice(0,n);}}
 
+const finite=value=>{{if(value===null||value===undefined||value==='')return null;const n=Number(value);return Number.isFinite(n)?n:null;}};
+const pointOf=record=>{{const p=record.centroid;if(!Array.isArray(p)||p.length<2)return null;const lon=finite(p[0]),lat=finite(p[1]);return lon===null||lat===null?null:[lon,lat];}};
+const distinct=(a,b)=>Math.abs(a-b)>Math.max(1e-12,Math.max(Math.abs(a),Math.abs(b))*1e-12);
+function comparisonValue(record){{const value=finite(record.value);return value===null?finite(record.area):value;}}
+function distanceM(first,second){{const a=pointOf(first),b=pointOf(second);if(!a||!b)return NaN;const rad=Math.PI/180,lat1=a[1]*rad,lat2=b[1]*rad,dlat=(b[1]-a[1])*rad,dlon=(b[0]-a[0])*rad;const h=Math.sin(dlat/2)**2+Math.cos(lat1)*Math.cos(lat2)*Math.sin(dlon/2)**2;return 12742017.6*Math.asin(Math.min(1,Math.sqrt(h)));}}
+function valuePairs(){{const pairs=[];for(let i=0;i<G.records.length;i++){{const first=G.records[i],firstValue=comparisonValue(first);if(firstValue===null)continue;for(let j=i+1;j<G.records.length;j++){{const second=G.records[j],secondValue=comparisonValue(second);if(secondValue!==null&&distinct(firstValue,secondValue))pairs.push([first,second,firstValue,secondValue]);}}}}return pairs;}}
+function distancePairs(){{const pairs=[];for(let i=0;i<G.records.length;i++){{if(!pointOf(G.records[i]))continue;for(let j=i+1;j<G.records.length;j++){{const metres=distanceM(G.records[i],G.records[j]);if(Number.isFinite(metres)&&metres>0.01)pairs.push([G.records[i],G.records[j],metres]);}}}}return pairs;}}
+function nearestOptions(){{const valid=G.records.filter(pointOf),options=[];valid.forEach(reference=>{{const ranked=valid.filter(record=>record!==reference).map(record=>[distanceM(reference,record),record]).filter(item=>Number.isFinite(item[0])).sort((a,b)=>a[0]-b[0]);if(ranked.length>=4&&ranked[0][0]>0.01&&distinct(ranked[0][0],ranked[1][0]))options.push([reference,ranked.map(item=>item[1])]);}});return options;}}
+function unavailable(message){{stopTimer();current=null;$('prompt').textContent=message;$('arena').textContent='Choose another supported challenge mix and export again.';}}
+
 // Dark mode
 function toggleDark(){{document.documentElement.dataset.theme=document.documentElement.dataset.theme==='dark'?'':'dark';localStorage.setItem('gq-dark',document.documentElement.dataset.theme);}}
 if(localStorage.getItem('gq-dark')==='dark')document.documentElement.dataset.theme='dark';
@@ -160,7 +191,7 @@ let timer_ms=0,timer_max=0;
 function startTimer(secs){{clearInterval(timerInterval);timer_ms=secs*1000;timer_max=secs*1000;updateTimerUI();timerInterval=setInterval(()=>{{timer_ms=Math.max(0,timer_ms-200);updateTimerUI();if(timer_ms<=0){{clearInterval(timerInterval);onTimeout();}}}},200);}}
 function stopTimer(){{clearInterval(timerInterval);$('timer-fill').style.width='100%';$('timer-fill').style.background='linear-gradient(90deg,#6c4cff,#00b8d9)';}}
 function updateTimerUI(){{const pct=timer_ms/timer_max;$('timer-fill').style.width=(pct*100)+'%';const color=pct>0.5?'linear-gradient(90deg,#6c4cff,#00b8d9)':pct>0.25?'linear-gradient(90deg,#f59e0b,#fbbf24)':'linear-gradient(90deg,#ef4444,#f87171)';$('timer-fill').style.background=color;}}
-function onTimeout(){{judge(false,'—','Time\'s up!');}}
+function onTimeout(){{judge(false,'—','Time\\'s up!');}}
 
 // Score animation
 function animateScore(from,to){{let start=null;const chip=$('hd-score');const step=ts=>{{if(!start)start=ts;const p=Math.min((ts-start)/400,1);chip.textContent=Math.round(from+(to-from)*p);chip.classList.add('score-anim');if(p<1)requestAnimationFrame(step);}};requestAnimationFrame(step);}}
@@ -176,15 +207,15 @@ function make(){{
   $('mode-badge').textContent=T[mode]||mode;
 
   if(mode==='bigger'){{
-    let [a,b]=sample(G.records,2);
-    let av=Number(a.value??a.area??0),bv=Number(b.value??b.area??0);
-    current={{mode,answer:av>=bv?a.label:b.label,detail:`${{a.label}}: ${{av.toLocaleString(undefined,{{maximumFractionDigits:2}})}}, ${{b.label}}: ${{bv.toLocaleString(undefined,{{maximumFractionDigits:2}})}}`}};
+    const pairs=valuePairs();if(!pairs.length){{unavailable('Value Duel is not available for this data.');return;}}
+    let [a,b,av,bv]=pick(pairs);
+    current={{mode,answer:av>bv?a.label:b.label,detail:`${{a.label}}: ${{av.toLocaleString(undefined,{{maximumFractionDigits:2}})}}, ${{b.label}}: ${{bv.toLocaleString(undefined,{{maximumFractionDigits:2}})}}`}};
     $('prompt').textContent=T.greater;
     choices([a.label,b.label],current.answer);
   }}
   else if(mode==='silhouette'){{
     let pool=G.records.filter(r=>r.outline&&r.outline.length>2);
-    if(pool.length<4){{make();return;}}
+    if(pool.length<4){{unavailable('Know the Shape is not available for this data.');return;}}
     let opts=sample(pool,Math.min(4,pool.length)),target=pick(opts);
     current={{mode,answer:target.label,detail:target.label}};
     $('prompt').textContent=T.shape;
@@ -192,9 +223,9 @@ function make(){{
     choices(shuffled(opts.map(r=>r.label)),current.answer);
   }}
   else if(mode==='distance'){{
-    let [a,b]=sample(G.records,2);
-    let dx=a.centroid[0]-b.centroid[0],dy=a.centroid[1]-b.centroid[1];
-    let truth=Math.hypot(dx,dy)*111320*Math.cos((a.centroid[1]+b.centroid[1])*Math.PI/360);
+    const pairs=distancePairs();if(!pairs.length){{unavailable('Distance Guess is not available for this data.');return;}}
+    let [a,b,truth]=pick(pairs);
+    truth=Math.abs(truth);
     current={{mode,answer:truth,detail:`${{(truth/1000).toFixed(2)}} km`}};
     $('prompt').textContent=`${{a.label}} → ${{b.label}}`;
     let max=Math.max(2000,truth*2.5);
@@ -204,13 +235,13 @@ function make(){{
       <div class="slider-hint"><span>0 km</span><span>${{(max/1000).toFixed(0)}} km</span></div>
       <button class="primary" id="dist-submit">${{T.dist_btn}}</button></div>`;
     $('rng').oninput=e=>$('sv').textContent=Math.round(e.target.value/1000)+' km';
-    $('dist-submit').onclick=()=>{{let ratio=Math.abs(Number($('rng').value)-truth)/Math.max(1,truth);judge(ratio<=0.25,current.detail,ratio<=0.25?'':'Answer: '+current.detail);}};
+    $('dist-submit').onclick=()=>{{let ratio=Math.abs(Number($('rng').value)-truth)/Math.max(1,Math.abs(truth));judge(ratio<=0.25,current.detail,ratio<=0.25?'':'Answer: '+current.detail);}};
   }}
   else if(mode==='attr_guess'){{
-    let valued=G.records.filter(r=>r.value!=null);if(valued.length<2){{make();return;}}
-    let target=pick(valued);
-    let all_vals=valued.map(r=>Number(r.value));
-    let min_v=Math.min(...all_vals),max_v=Math.max(...all_vals);
+    let valued=G.records.filter(r=>finite(r.value)!==null);
+    let all_vals=valued.map(r=>finite(r.value));
+    if(new Set(all_vals).size<2){{unavailable('Attribute Guess is not available for this data.');return;}}
+    let target=pick(valued),min_v=Math.min(...all_vals),max_v=Math.max(...all_vals);
     current={{mode,answer:Number(target.value),detail:Number(target.value).toLocaleString(undefined,{{maximumFractionDigits:2}})}};
     $('prompt').textContent=`${{T.attr_q}}: ${{target.label}}`;
     let init=Math.round((min_v+(max_v-min_v)*0.5));
@@ -220,18 +251,29 @@ function make(){{
       <div class="slider-hint"><span>${{min_v.toLocaleString()}}</span><span>${{max_v.toLocaleString()}}</span></div>
       <button class="primary" id="attr-submit">${{T.attr_btn}}</button></div>`;
     $('rng').oninput=e=>$('sv').textContent=Number(e.target.value).toLocaleString();
-    $('attr-submit').onclick=()=>{{let guess=Number($('rng').value),truth=current.answer,tol=0.25;let ratio=Math.abs(guess-truth)/Math.max(1,Math.abs(truth));judge(ratio<=tol,current.detail,'Answer: '+current.detail);}};
+    $('attr-submit').onclick=()=>{{let guess=Number($('rng').value),truth=current.answer,tol=0.25;let ratio=Math.abs(guess-truth)/Math.max(1,max_v-min_v);judge(ratio<=tol,current.detail,'Answer: '+current.detail);}};
+  }}
+  else if(mode==='ordering'){{
+    const valued=G.records.filter(r=>finite(r.value)!==null),groups=new Map();
+    valued.forEach(record=>{{const value=finite(record.value);groups.set(value,[...(groups.get(value)||[]),record]);}});
+    if(groups.size<3){{unavailable('Ranking is not available for this data.');return;}}
+    const values=sample([...groups.keys()],Math.min(4,groups.size));
+    const items=shuffled(values.map(value=>pick(groups.get(value))));
+    const answer=[...items].sort((a,b)=>finite(b.value)-finite(a.value)).map(record=>record.label);
+    current={{mode,answer,detail:answer.join(' > ')}};
+    $('prompt').textContent=T.order_q;
+    rankChoices(items,answer);
   }}
   else if(mode==='nearest'){{
-    if(G.records.length<5){{make();return;}}
-    let pool=sample(G.records,5),ref=pool[0],cands=pool.slice(1);
-    let dist=r=>Math.hypot(r.centroid[0]-ref.centroid[0],r.centroid[1]-ref.centroid[1]);
-    let nearest=cands.reduce((a,b)=>dist(a)<dist(b)?a:b);
+    const options=nearestOptions();if(!options.length){{unavailable('Nearest Neighbour is not available for this data.');return;}}
+    let [ref,ranked]=pick(options);
+    let nearest=ranked[0],cands=[nearest,...sample(ranked.slice(1),3)];
+    cands=shuffled(cands);
     current={{mode,answer:nearest.label,detail:nearest.label}};
     $('prompt').textContent=`${{T.nearest_q}} ${{ref.label}}?`;
     choices(shuffled(cands.map(r=>r.label)),nearest.label);
   }}
-  else {{make();return;}}
+  else {{unavailable('This challenge is not available in the offline game.');return;}}
 
   startTimer(30);
 }}
@@ -242,7 +284,28 @@ function choices(items,answer){{
   arena.querySelectorAll('button[data-a]').forEach(b=>b.onclick=()=>judge(b.dataset.a===answer,answer));
 }}
 
+
+function rankChoices(items,answer){{
+  const arena=$('arena'),list=document.createElement('div'),submit=document.createElement('button');
+  list.className='rank-list';submit.className='primary';submit.textContent=T.rank_btn;
+  function redraw(){{
+    list.replaceChildren();
+    items.forEach((item,index)=>{{
+      const row=document.createElement('div'),position=document.createElement('span'),label=document.createElement('span'),up=document.createElement('button'),down=document.createElement('button');
+      row.className='rank-row';position.textContent=String(index+1);label.className='rank-label';label.textContent=item.label;
+      up.className='rank-move';up.textContent='Up';up.disabled=index===0;
+      down.className='rank-move';down.textContent='Down';down.disabled=index===items.length-1;
+      up.onclick=()=>{{if(index>0){{[items[index-1],items[index]]=[items[index],items[index-1]];redraw();}}}};
+      down.onclick=()=>{{if(index<items.length-1){{[items[index+1],items[index]]=[items[index],items[index+1]];redraw();}}}};
+      row.append(position,label,up,down);list.appendChild(row);
+    }});
+  }}
+  submit.onclick=()=>{{const submitted=items.map(item=>item.label),correct=submitted.length===answer.length&&submitted.every((label,index)=>label===answer[index]);judge(correct,answer.join(' > '),correct?'':'Answer: '+answer.join(' > '));}};
+  arena.append(list,submit);redraw();
+}}
 function judge(ok,answer,extra_detail=''){{
+  if(!current||current.answered)return;
+  current.answered=true;
   stopTimer();
   const old_score=score;
   round++;
@@ -257,11 +320,7 @@ function judge(ok,answer,extra_detail=''){{
   fb.className=ok?'good':'bad';
   fb.textContent=(ok?T.correct:T.wrong)+(extra_detail||String(answer));
   $('arena').querySelectorAll('button,input').forEach(x=>x.disabled=true);
-  if(ok){{
-    $('arena').querySelectorAll(`button[data-a="${{esc(String(answer))}}"]`).forEach(b=>b.className+=' btn-good');
-  }}else{{
-    $('arena').querySelectorAll(`button[data-a="${{esc(String(answer))}}"]`).forEach(b=>b.className+=' btn-good');
-  }}
+  $('arena').querySelectorAll('button[data-a]').forEach(button=>{{if(button.dataset.a===String(answer))button.className+=' btn-good';}});
   const next=$('next-btn');
   next.hidden=false;
   if(round>=G.rounds||lives<=0){{next.textContent=T.finish;next.onclick=finish;}}

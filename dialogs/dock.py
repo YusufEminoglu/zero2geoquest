@@ -21,7 +21,7 @@ from qgis.core import (
 )
 from qgis.gui import QgsFieldComboBox, QgsHighlight, QgsMapLayerComboBox
 
-from ..core.exporter import write_html
+from ..core.exporter import HTML_MODES, write_html
 from ..core.game import DIFFICULTY, MODES, GameSession, QuestionFactory
 from ..core.layer_data import feature_at_point, merge_layers, records_from_layer
 from ..core.profiles import AVATARS, ProfileManager
@@ -168,6 +168,7 @@ class GeoQuestDockWidget(QDockWidget):
         self._highlight: QgsHighlight | None = None
         self._saved_extent = None  # restored after blind_zoom
 
+        self._active_modes: list[str] = []
         # Difficulty
         self._difficulty = "Medium"
 
@@ -642,6 +643,15 @@ class GeoQuestDockWidget(QDockWidget):
     def _selected_modes(self) -> list[str]:
         return [m for m, cb in self.mode_checks.items() if cb.isChecked()]
 
+    def _layer_for_id(self, layer_id: str | None):
+        """Return the configured source layer matching a record layer id."""
+        candidates = (self.layer_combo.currentLayer(), self.layer_combo_b.currentLayer())
+        for layer in candidates:
+            if layer is not None and layer.id() == layer_id:
+                return layer
+        return None
+
+
     # ── Game lifecycle ────────────────────────────────────────────────────────
 
     def _prepare_records(self) -> bool:
@@ -695,6 +705,15 @@ class GeoQuestDockWidget(QDockWidget):
             return False
 
         self.factory = QuestionFactory(self.records, seed=time.time_ns())
+        self._active_modes = self.factory.available_modes(modes)
+        if not self._active_modes:
+            self.builder_status.setText(
+                "Selected modes need more suitable or more varied feature data.")
+            return False
+        if len(self._active_modes) != len(modes):
+            skipped = [MODE_LABELS[mode] for mode in modes if mode not in self._active_modes]
+            self.builder_status.setText("Skipped unavailable modes: " + ", ".join(skipped))
+
         self.export_summary.setText(
             f"{self.quest_title.currentText()} · {len(self.records)} features · "
             f"{self.round_count.value()} rounds · {self._difficulty}")
@@ -703,13 +722,7 @@ class GeoQuestDockWidget(QDockWidget):
     def start_game(self) -> None:
         if not self._prepare_records():
             return
-        modes = self._selected_modes()
-        has_value = bool(self.value_field.currentField())
-        if not has_value:
-            modes = [m for m in modes if m not in ("attr_guess", "ordering")]
-        if not modes:
-            self.builder_status.setText(self._t("choose"))
-            return
+        modes = self._active_modes
         self.session = GameSession(
             modes, self.round_count.value(), self.lives_count.value(),
             seed=time.time_ns(), difficulty=self._difficulty,
@@ -900,15 +913,17 @@ class GeoQuestDockWidget(QDockWidget):
     def _submit_distance(self) -> None:
         truth = float(self.question["answer"]) / 1000.0
         guess = float(self.distance_guess.value())
-        error = abs(guess - truth) / max(0.001, truth)
-        self._score(error <= 0.25, f"{truth:,.1f} km",
+        error = abs(guess - truth) / max(0.001, abs(truth))
+        tol = float(self.question.get("tolerance", 0.25))
+        self._score(error <= tol, f"{truth:,.1f} km",
                     closeness=max(0.25, 1.0 - error))
 
     def _submit_attr_guess(self) -> None:
         actual = self._attr_slider_min + self.attr_slider.value() * self._attr_slider_scale
         truth = float(self.question["answer"])
         tol = float(self.question.get("tolerance", 0.25))
-        error = abs(actual - truth) / max(1e-9, abs(truth))
+        scale = float(self.question.get("tolerance_scale", max(1.0, abs(truth))))
+        error = abs(actual - truth) / max(1e-9, scale)
         self._score(error <= tol, f"{truth:,.2f}",
                     closeness=max(0.25, 1.0 - error))
 
@@ -921,7 +936,12 @@ class GeoQuestDockWidget(QDockWidget):
     def handle_map_pick(self, point) -> None:
         if not self.question or self.question.get("mode") != "locate" or self.session is None:
             return
-        layer = self.layer_combo.currentLayer()
+        layer_id = self.question.get("target_layer_id")
+        layer = self._layer_for_id(layer_id)
+        if layer is None:
+            self._score(False, str(self.question["answer"]),
+                        extra_feedback="The target layer is no longer available.")
+            return
         canvas = self.iface.mapCanvas()
         tolerance = canvas.mapUnitsPerPixel() * 12.0
         layer_point, layer_tol = point, tolerance
@@ -936,18 +956,19 @@ class GeoQuestDockWidget(QDockWidget):
         picked = feature_at_point(layer, layer_point, layer_tol)
         target = int(self.question["target_fid"])
         correct = picked == target
-        self._highlight_feature(target, QColor("#15a66a") if correct else QColor("#e94f64"))
+        self._highlight_feature(target, QColor("#15a66a") if correct else QColor("#e94f64"), layer_id)
         self._score(correct, str(self.question["answer"]))
 
     # ── Scoring ───────────────────────────────────────────────────────────────
 
     def _score(self, correct: bool, answer: str, closeness: float = 1.0,
                extra_feedback: str = "") -> None:
-        if self.session is None:
+        if self.session is None or not self.session.awaiting_answer:
             return
         self._countdown_timer.stop()
         elapsed = time.monotonic() - self._question_time
         result = self.session.answer(correct, elapsed=elapsed, closeness=closeness)
+        correct = result["correct"]
         color = "#13795b" if correct else "#c9344f"
         lead = self._t("correct") if correct else self._t("wrong")
         gained = f" +{result['gained']}" if result["gained"] else ""
@@ -1091,9 +1112,9 @@ class GeoQuestDockWidget(QDockWidget):
 
     # ── Highlight ─────────────────────────────────────────────────────────────
 
-    def _highlight_feature(self, fid: int, color: QColor) -> None:
+    def _highlight_feature(self, fid: int, color: QColor, layer_id: str | None = None) -> None:
         self._clear_highlight()
-        layer = self.layer_combo.currentLayer()
+        layer = self._layer_for_id(layer_id) if layer_id else self.layer_combo.currentLayer()
         if layer is None:
             return
         feature = next(layer.getFeatures(QgsFeatureRequest(fid)), None)
@@ -1213,9 +1234,22 @@ class GeoQuestDockWidget(QDockWidget):
     # ── HTML export ───────────────────────────────────────────────────────────
 
     def _export_html(self) -> None:
-        if not self.records and not self._prepare_records():
+        if not self._prepare_records():
             self._show_page(1)
             return
+        web_modes = [mode for mode in self._active_modes if mode in HTML_MODES]
+        skipped_modes = [mode for mode in self._active_modes if mode not in HTML_MODES]
+        if not web_modes:
+            QMessageBox.warning(
+                self, PLUGIN_TITLE,
+                "Offline HTML supports Value Duel, Distance Guess, Know the Shape, "
+                "Attribute Guess, Ranking, and Nearest Neighbour. Map Hunt and Blind Zoom need QGIS.")
+            return
+        if skipped_modes:
+            QMessageBox.information(
+                self, PLUGIN_TITLE,
+                "The HTML game will omit QGIS-only modes: " +
+                ", ".join(MODE_LABELS[mode] for mode in skipped_modes))
         filename, _ = QFileDialog.getSaveFileName(
             self, "Export GeoQuest",
             self.quest_title.currentText().replace(" ", "_") + ".html",
@@ -1226,7 +1260,10 @@ class GeoQuestDockWidget(QDockWidget):
             filename += ".html"
         try:
             write_html(filename, self.quest_title.currentText(),
-                       self.records, self._selected_modes(), self.round_count.value())
+                       self.records, web_modes, self.round_count.value())
+        except ValueError as exc:
+            QMessageBox.warning(self, PLUGIN_TITLE, str(exc))
+            return
         except OSError as exc:
             QMessageBox.critical(self, PLUGIN_TITLE, str(exc))
             return

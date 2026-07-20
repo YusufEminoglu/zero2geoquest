@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.0.2] - 2026-07-20
+
+- Fix: mixed-layer Map Hunt now evaluates clicks and highlights against the question's source layer.
+- Fix: skip tied, invalid, or insufficient data before generating value, distance, ranking, and nearest-neighbour questions.
+- Fix: enforce one answer per challenge, including true timeout handling and stable zero/negative attribute tolerance.
+- Fix: offline HTML export now warns about QGIS-only modes, prevents invalid fallback games, and supports Ranking.
+
 ## [1.0.1] - 2026-07-20
 
 - Docs update: comprehensive README for 8 game modes, class mode, jokers, difficulty levels, and HTML web export

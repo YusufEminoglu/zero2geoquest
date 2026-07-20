@@ -103,6 +103,7 @@ def records_from_layer(layer, label_field: str = "", value_field: str = "",
             "bbox_wgs84": bbox_wgs84,
             "outline": outline,
             "layer_id": layer.id(),
+            "layer_name": layer.name(),
         })
         if len(records) >= maximum:
             break

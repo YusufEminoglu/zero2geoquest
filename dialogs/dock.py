@@ -12,11 +12,11 @@ from qgis.PyQt.QtCore import QPointF, Qt, pyqtSignal
 from qgis.PyQt.QtGui import QColor, QPainter, QPainterPath, QPen, QPixmap
 from qgis.PyQt.QtWidgets import (
     QCheckBox, QComboBox, QDockWidget, QDoubleSpinBox, QFileDialog, QFormLayout,
-    QFrame, QGridLayout, QGroupBox, QHBoxLayout, QLabel, QListWidget,
+    QGridLayout, QGroupBox, QHBoxLayout, QLabel, QListWidget,
     QMessageBox, QPushButton, QScrollArea, QSpinBox, QStackedWidget, QVBoxLayout,
     QWidget,
 )
-from qgis.core import Qgis, QgsFeatureRequest, QgsProject, QgsSettings
+from qgis.core import Qgis, QgsFeatureRequest, QgsSettings
 from qgis.gui import QgsFieldComboBox, QgsHighlight, QgsMapLayerComboBox
 
 from ..core.exporter import write_html
@@ -27,22 +27,12 @@ PLUGIN_TITLE = "02GeoQuest — Playable Map Studio"
 SETTINGS_KEY = "zero2geoquest/leaderboard"
 
 TEXT = {
-    "tr": {
-        "play": "Oyna", "build": "Oyun Kur", "scores": "Skorlar", "share": "Paylaş",
-        "ready": "Katmanını seç, kuralları belirle ve macerayı başlat.",
-        "start": "Macera başlasın", "next": "Sonraki soru", "finish": "Macera tamamlandı!",
-        "locate": "Haritada Bul", "bigger": "Değer Düellosu", "distance": "Mesafe Tahmini",
-        "silhouette": "Silüeti Tanı", "correct": "Harika, doğru!", "wrong": "Bu kez olmadı.",
-        "exported": "Web oyunu oluşturuldu", "choose": "Bir katman ve en az bir oyun modu seçin.",
-    },
-    "en": {
-        "play": "Play", "build": "Build Quest", "scores": "Scores", "share": "Share",
-        "ready": "Choose a layer, set the rules and launch your quest.",
-        "start": "Start the quest", "next": "Next challenge", "finish": "Quest complete!",
-        "locate": "Map Hunt", "bigger": "Value Duel", "distance": "Distance Guess",
-        "silhouette": "Know the Shape", "correct": "Great, correct!", "wrong": "Not this time.",
-        "exported": "Web game created", "choose": "Choose a layer and at least one game mode.",
-    },
+    "play": "Play", "build": "Build Quest", "scores": "Scores", "share": "Share",
+    "ready": "Choose a layer, set the rules and launch your quest.",
+    "start": "Start the quest", "next": "Next challenge", "finish": "Quest complete!",
+    "locate": "Map Hunt", "bigger": "Value Duel", "distance": "Distance Guess",
+    "silhouette": "Know the Shape", "correct": "Great, correct!", "wrong": "Not this time.",
+    "exported": "Web game created", "choose": "Choose a layer and at least one game mode.",
 }
 
 QSS = """
@@ -118,7 +108,6 @@ class GeoQuestDockWidget(QDockWidget):
         self._question_time = 0.0
         self._highlight = None
         self._answer_buttons = []
-        self._language = str(QgsSettings().value("zero2geoquest/language", "tr"))
         self.setAllowedAreas(Qt.DockWidgetArea.LeftDockWidgetArea | Qt.DockWidgetArea.RightDockWidgetArea)
         self.setMinimumWidth(360)
         self._build_ui()
@@ -126,7 +115,7 @@ class GeoQuestDockWidget(QDockWidget):
         self._refresh_texts()
 
     def _t(self, key: str) -> str:
-        return TEXT.get(self._language, TEXT["en"]).get(key, key)
+        return TEXT.get(key, key)
 
     def _build_ui(self) -> None:
         root_widget = QWidget()
@@ -146,12 +135,6 @@ class GeoQuestDockWidget(QDockWidget):
         header.addWidget(icon)
         title = QLabel("<b style='font-size:14pt'><span style='color:#6c4cff'>02</span>GeoQuest</b><br><span style='color:#718096'>Playable Map Studio</span>")
         header.addWidget(title, 1)
-        self.language = QComboBox()
-        self.language.addItem("TR", "tr")
-        self.language.addItem("EN", "en")
-        self.language.setCurrentIndex(max(0, self.language.findData(self._language)))
-        self.language.currentIndexChanged.connect(self._change_language)
-        header.addWidget(self.language)
         root.addLayout(header)
 
         nav = QHBoxLayout()
@@ -334,11 +317,6 @@ class GeoQuestDockWidget(QDockWidget):
         layout.addStretch(1)
         return page
 
-    def _change_language(self) -> None:
-        self._language = str(self.language.currentData())
-        QgsSettings().setValue("zero2geoquest/language", self._language)
-        self._refresh_texts()
-
     def _refresh_texts(self) -> None:
         for key, button in self.nav_buttons:
             button.setText(self._t(key))
@@ -430,19 +408,7 @@ class GeoQuestDockWidget(QDockWidget):
             self.question = self.factory.make(fallback)
         self._question_time = time.monotonic()
         self.mode_badge.setText(self._t(self.question["mode"]))
-        prompts = {
-            "tr": {
-                "locate": f"Haritada {self.question.get('answer', '')} konumunu bul",
-                "bigger": "Hangisinin değeri daha büyük?",
-                "distance": f"Mesafeyi tahmin et: {self.question.get('from', '')} → {self.question.get('to', '')}",
-                "silhouette": "Bu silüet hangi objeye ait?",
-            },
-            "en": {
-                "locate": self.question["prompt"], "bigger": self.question["prompt"],
-                "distance": self.question["prompt"], "silhouette": self.question["prompt"],
-            },
-        }
-        self.prompt.setText(prompts.get(self._language, prompts["en"])[self.question["mode"]])
+        self.prompt.setText(self.question["prompt"])
         self._update_stats()
         mode = self.question["mode"]
         if mode == "locate":
@@ -598,7 +564,7 @@ class GeoQuestDockWidget(QDockWidget):
             filename += ".html"
         try:
             write_html(filename, self.quest_title.currentText(), self.records,
-                       self._selected_modes(), self.round_count.value(), self._language)
+                       self._selected_modes(), self.round_count.value(), "en")
         except OSError as exc:
             QMessageBox.critical(self, PLUGIN_TITLE, str(exc))
             return

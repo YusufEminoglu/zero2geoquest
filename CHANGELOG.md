@@ -1,5 +1,9 @@
 # Changelog
 
+## [0.9.3] - 2026-07-20
+
+- Refactor: English-only UI — remove TR/EN switcher, Turkish TEXT block, and Turkish HTML export strings
+
 ## [0.9.2] - 2026-07-20
 
 - Fix: QgsHighlight import from qgis.core to qgis.gui (QGIS 3.44 LTR compatibility)

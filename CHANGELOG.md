@@ -1,5 +1,9 @@
 # Changelog
 
+## [0.9.2] - 2026-07-20
+
+- Fix: QgsHighlight import from qgis.core to qgis.gui (QGIS 3.44 LTR compatibility)
+
 ## [0.9.1] - 2026-07-20
 
 - Replace the icon with a cleaner map-route quest mark

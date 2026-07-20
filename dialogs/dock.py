@@ -16,8 +16,8 @@ from qgis.PyQt.QtWidgets import (
     QMessageBox, QPushButton, QScrollArea, QSpinBox, QStackedWidget, QVBoxLayout,
     QWidget,
 )
-from qgis.core import Qgis, QgsFeatureRequest, QgsHighlight, QgsProject, QgsSettings
-from qgis.gui import QgsFieldComboBox, QgsMapLayerComboBox
+from qgis.core import Qgis, QgsFeatureRequest, QgsProject, QgsSettings
+from qgis.gui import QgsFieldComboBox, QgsHighlight, QgsMapLayerComboBox
 
 from ..core.exporter import write_html
 from ..core.game import GameSession, QuestionFactory

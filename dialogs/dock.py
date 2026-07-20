@@ -520,7 +520,6 @@ class GeoQuestDockWidget(QDockWidget):
     def _clear_highlight(self) -> None:
         if self._highlight is not None:
             self._highlight.hide()
-            self._highlight.deleteLater()
             self._highlight = None
 
     def _scores(self) -> list[dict]:

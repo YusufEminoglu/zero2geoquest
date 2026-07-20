@@ -1,5 +1,9 @@
 # Changelog
 
+## [0.9.5] - 2026-07-20
+
+- Fix: QgsHighlight.deleteLater() AttributeError on QGIS 3.44 — QgsHighlight is a QGraphicsItem, not QObject; hide() + None release is the correct cleanup
+
 ## [0.9.4] - 2026-07-20
 
 - Fix: Polygon vs MultiPolygon dispatch in _first_outline — OSM building layers (single Polygon type) no longer crash Silhouette mode

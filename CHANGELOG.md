@@ -1,5 +1,9 @@
 # Changelog
 
+## [0.9.4] - 2026-07-20
+
+- Fix: Polygon vs MultiPolygon dispatch in _first_outline — OSM building layers (single Polygon type) no longer crash Silhouette mode
+
 ## [0.9.3] - 2026-07-20
 
 - Refactor: English-only UI — remove TR/EN switcher, Turkish TEXT block, and Turkish HTML export strings

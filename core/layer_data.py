@@ -28,9 +28,13 @@ def _first_outline(geometry: QgsGeometry, limit: int = 240) -> list[list[float]]
         simplified = geom.simplify(tolerance)
         if simplified and not simplified.isEmpty():
             geom = simplified
-    polygon = geom.asMultiPolygon()
-    rings = [part[0] for part in polygon if part] if polygon else []
-    if not rings:
+    flat = QgsWkbTypes.flatType(geom.wkbType())
+    _MULTI_POLYGON = getattr(QgsWkbTypes, "MultiPolygon",
+                             getattr(QgsWkbTypes.Type, "MultiPolygon", 6))
+    if flat == _MULTI_POLYGON:
+        parts = geom.asMultiPolygon()
+        rings = [part[0] for part in parts if part] if parts else []
+    else:
         single = geom.asPolygon()
         rings = [single[0]] if single else []
     if not rings:

@@ -1,0 +1,26 @@
+[general]
+name=02GeoQuest - Playable Map Studio
+qgisMinimumVersion=3.34
+qgisMaximumVersion=4.99
+description=Turn any vector layer into a polished geography game, classroom challenge or public-engagement quest.
+version=0.9.1
+author=Yusuf Eminoglu
+email=yusuf.eminoglu@deu.edu.tr
+
+about=02GeoQuest transforms ordinary QGIS vector layers into playful, useful challenges. Play Map Hunt directly on the QGIS canvas, compare attribute values, estimate distances and recognise polygon silhouettes. Build mixed quests in seconds, keep a local leaderboard and export a privacy-friendly standalone HTML game that works entirely offline. No account, API key, server or pip dependency is required. Developed with feedback from educational workflows at Dokuz Eylul University, Department of City and Regional Planning.
+
+tracker=https://github.com/YusufEminoglu/zero2geoquest/issues
+repository=https://github.com/YusufEminoglu/zero2geoquest
+homepage=https://github.com/YusufEminoglu/zero2geoquest
+
+category=Vector
+tags=game,education,quiz,geography,engagement,classroom,offline,html,planx
+icon=icons/icon.png
+
+experimental=False
+deprecated=False
+hasProcessingProvider=no
+license=GPL-3
+
+changelog=
+    0.9.0 - Complete alpha: four game modes, quest builder, canvas interaction, scoring, leaderboard, bilingual UI and standalone offline HTML export.

@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""Convert a QGIS vector layer into compact, game-ready records."""
+"""Convert QGIS vector layers into compact, game-ready records."""
 from __future__ import annotations
 
 import math
@@ -10,6 +10,7 @@ from qgis.core import (
     QgsCoordinateTransform,
     QgsDistanceArea,
     QgsGeometry,
+    QgsPointXY,
     QgsProject,
     QgsWkbTypes,
 )
@@ -28,10 +29,10 @@ def _first_outline(geometry: QgsGeometry, limit: int = 240) -> list[list[float]]
         simplified = geom.simplify(tolerance)
         if simplified and not simplified.isEmpty():
             geom = simplified
-    flat = QgsWkbTypes.flatType(geom.wkbType())
-    _MULTI_POLYGON = getattr(QgsWkbTypes, "MultiPolygon",
-                             getattr(QgsWkbTypes.Type, "MultiPolygon", 6))
-    if flat == _MULTI_POLYGON:
+    # Dispatch on actual flat type — asMultiPolygon() raises on single Polygon in QGIS 3.34+
+    _MULTI = getattr(QgsWkbTypes, "MultiPolygon",
+                     getattr(QgsWkbTypes.Type, "MultiPolygon", 6))
+    if QgsWkbTypes.flatType(geom.wkbType()) == _MULTI:
         parts = geom.asMultiPolygon()
         rings = [part[0] for part in parts if part] if parts else []
     else:
@@ -52,10 +53,10 @@ def records_from_layer(layer, label_field: str = "", value_field: str = "",
     distance = QgsDistanceArea()
     distance.setSourceCrs(layer.crs(), QgsProject.instance().transformContext())
     distance.setEllipsoid(QgsProject.instance().ellipsoid() or "WGS84")
+    wgs84 = QgsCoordinateReferenceSystem("EPSG:4326")
     to_wgs84 = QgsCoordinateTransform(
-        layer.crs(), QgsCoordinateReferenceSystem("EPSG:4326"),
-        QgsProject.instance().transformContext())
-    records = []
+        layer.crs(), wgs84, QgsProject.instance().transformContext())
+    records: list[dict] = []
     for feature in layer.getFeatures():
         geometry = feature.geometry()
         if not geometry or geometry.isEmpty():
@@ -82,14 +83,40 @@ def records_from_layer(layer, label_field: str = "", value_field: str = "",
             lon_lat = [float(geographic.x()), float(geographic.y())]
         except Exception:
             lon_lat = [float(centroid.x()), float(centroid.y())]
+        # Bounding box in WGS84 — needed for blind_zoom canvas extent
+        try:
+            raw_bbox = geometry.boundingBox()
+            sw = to_wgs84.transform(QgsPointXY(raw_bbox.xMinimum(), raw_bbox.yMinimum()))
+            ne = to_wgs84.transform(QgsPointXY(raw_bbox.xMaximum(), raw_bbox.yMaximum()))
+            bbox_wgs84 = [float(sw.x()), float(sw.y()), float(ne.x()), float(ne.y())]
+        except Exception:
+            cx, cy = lon_lat
+            buf = 0.002
+            bbox_wgs84 = [cx - buf, cy - buf, cx + buf, cy + buf]
+        outline = _first_outline(geometry)
         records.append({
-            "fid": int(feature.id()), "label": label, "value": value,
-            "area": area, "centroid": lon_lat,
-            "outline": _first_outline(geometry),
+            "fid": int(feature.id()),
+            "label": label,
+            "value": value,
+            "area": area,
+            "centroid": lon_lat,
+            "bbox_wgs84": bbox_wgs84,
+            "outline": outline,
+            "layer_id": layer.id(),
         })
         if len(records) >= maximum:
             break
     return records
+
+
+def merge_layers(layer_a, label_a: str, value_a: str,
+                 layer_b, label_b: str, value_b: str,
+                 maximum: int = 500) -> list[dict]:
+    """Combine records from two layers (up to maximum total)."""
+    half = maximum // 2
+    records_a = records_from_layer(layer_a, label_a, value_a, half)
+    records_b = records_from_layer(layer_b, label_b, value_b, maximum - len(records_a))
+    return records_a + records_b
 
 
 def feature_at_point(layer, point, tolerance: float) -> int | None:

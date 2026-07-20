@@ -1,5 +1,9 @@
 # Changelog
 
+## [1.0.0] - 2026-07-20
+
+- Major release: 8 game modes, countdown timer, joker system, difficulty levels, multi-layer support, class mode with profiles, premium HTML export with dark mode
+
 ## [0.9.5] - 2026-07-20
 
 - Fix: QgsHighlight.deleteLater() AttributeError on QGIS 3.44 — QgsHighlight is a QGraphicsItem, not QObject; hide() + None release is the correct cleanup

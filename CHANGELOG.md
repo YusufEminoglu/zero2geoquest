@@ -1,5 +1,18 @@
 # Changelog
 
+## [1.0.3] - 2026-08-03
+
+### Changed
+- Replace the hardcoded stylesheet and inline colour literals with palette-derived
+  tokens so the entire dock — stats cards, silhouette canvas, feedback text, timer
+  bar, privacy badge — stays readable under QGIS light, dark and high-contrast
+  themes.
+- The dock now listens for PaletteChange and re-applies the theme automatically.
+
+### Added
+- `dialogs/theme.py` with WCAG contrast-ratio checks, palette-aware colour tokens,
+  and `apply_adaptive_theme()` entry point.
+
 ## [1.0.2] - 2026-07-20
 
 - Fix: mixed-layer Map Hunt now evaluates clicks and highlights against the question's source layer.

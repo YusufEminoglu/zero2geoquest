@@ -7,7 +7,7 @@ import math
 import os
 import time
 
-from qgis.PyQt.QtCore import QPointF, Qt, QTimer, pyqtSignal
+from qgis.PyQt.QtCore import QEvent, QPointF, Qt, QTimer, pyqtSignal
 from qgis.PyQt.QtGui import QColor, QPainter, QPainterPath, QPen, QPixmap
 from qgis.PyQt.QtWidgets import (
     QAbstractItemView, QCheckBox, QComboBox, QDockWidget, QDoubleSpinBox,
@@ -25,6 +25,7 @@ from ..core.exporter import HTML_MODES, write_html
 from ..core.game import DIFFICULTY, MODES, GameSession, QuestionFactory
 from ..core.layer_data import feature_at_point, merge_layers, records_from_layer
 from ..core.profiles import AVATARS, ProfileManager
+from .theme import apply_adaptive_theme, dock_color_tokens
 
 PLUGIN_TITLE = "02GeoQuest — Playable Map Studio"
 SETTINGS_KEY = "zero2geoquest/leaderboard"
@@ -51,60 +52,6 @@ MODE_DESC = {
     "blind_zoom": "Canvas zooms to a feature — name it",
 }
 
-QSS = """
-#gqRoot { background: #f4f6fb; }
-#gqRoot QLabel { color: #17212b; background: transparent; }
-#gqRoot QScrollArea, #gqRoot QScrollArea > QWidget > QWidget { background: transparent; border: none; }
-#gqRoot QPushButton {
-    color:#263238; background:#fff; border:1px solid #d8dfeb;
-    border-radius:8px; padding:7px 10px; font-weight:600;
-}
-#gqRoot QPushButton:hover { border-color:#6c4cff; background:#f3f0ff; }
-#gqRoot QPushButton:checked { color:#fff; background:#6c4cff; border-color:#5438d6; }
-#gqRoot QPushButton[class='nav'] { border:none; border-radius:7px; padding:8px 6px; }
-#gqRoot QPushButton[class='primary'] {
-    color:#fff; background:#6c4cff; border-color:#5438d6;
-    font-weight:800; padding:10px;
-}
-#gqRoot QPushButton[class='primary']:hover { background:#5a3de7; }
-#gqRoot QPushButton[class='primary']:disabled { background:#a0a0b0; border-color:#888; }
-#gqRoot QPushButton[class='answer'] { text-align:left; padding:11px; font-size:10pt; }
-#gqRoot QPushButton[class='joker'] {
-    color:#7c3aed; background:#f5f3ff; border:1px solid #c4b5fd;
-    border-radius:8px; padding:6px 8px; font-size:9pt; font-weight:700;
-}
-#gqRoot QPushButton[class='joker']:hover { background:#ede9fe; border-color:#7c3aed; }
-#gqRoot QPushButton[class='joker']:disabled { opacity: 0.4; }
-#gqRoot QPushButton[class='diff'] { padding:8px 14px; border-radius:8px; }
-#gqRoot QGroupBox {
-    color:#374151; background:#fff; border:1px solid #dce3ed;
-    border-radius:11px; margin-top:11px; padding:12px 8px 8px; font-weight:700;
-}
-#gqRoot QGroupBox::title { subcontrol-origin:margin; left:10px; padding:0 5px; }
-#gqRoot QComboBox, #gqRoot QSpinBox, #gqRoot QDoubleSpinBox {
-    color:#17212b; background:#fff; border:1px solid #d5dde8; border-radius:6px; padding:5px;
-}
-#gqRoot QListWidget {
-    color:#263238; background:#fff; border:1px solid #dce3ed; border-radius:9px;
-}
-#gqRoot QListWidget::item { padding:7px; border-bottom:1px solid #eef1f5; }
-#gqRoot QCheckBox { color:#374151; spacing:7px; }
-#gqRoot QProgressBar {
-    border:none; border-radius:4px; background:#e9ecf0;
-    text-align:center; font-weight:700; font-size:9pt; color:#374151;
-}
-#gqRoot QProgressBar::chunk { border-radius:4px; background:#6c4cff; }
-#gqRoot QSlider::groove:horizontal {
-    border-radius:3px; height:6px; background:#dce3ed;
-}
-#gqRoot QSlider::handle:horizontal {
-    background:#6c4cff; border-radius:8px;
-    width:16px; height:16px; margin:-5px 0;
-}
-#gqRoot QSlider::sub-page:horizontal { background:#6c4cff; border-radius:3px; }
-"""
-
-
 # ── Silhouette preview widget ─────────────────────────────────────────────────
 
 class SilhouetteCanvas(QWidget):
@@ -123,9 +70,10 @@ class SilhouetteCanvas(QWidget):
         del event
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
-        painter.fillRect(self.rect(), QColor("#f8f7ff"))
-        painter.setPen(QPen(QColor("#4731b7"), 2))
-        painter.setBrush(QColor("#6c4cff"))
+        t = dock_color_tokens()
+        painter.fillRect(self.rect(), QColor(t["card"]))
+        painter.setPen(QPen(QColor(t["accent"]), 2))
+        painter.setBrush(QColor(t["accent"]))
         if len(self._outline) < 3:
             painter.end()
             return
@@ -211,7 +159,6 @@ class GeoQuestDockWidget(QDockWidget):
         root_widget = QWidget()
         root_widget.setObjectName("gqRoot")
         root_widget.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
-        root_widget.setStyleSheet(QSS)
         root = QVBoxLayout(root_widget)
         root.setContentsMargins(9, 9, 9, 9)
         root.setSpacing(8)
@@ -250,6 +197,7 @@ class GeoQuestDockWidget(QDockWidget):
         root.addWidget(self.pages, 1)
         self.setWidget(root_widget)
         self._show_page(1)
+        self._apply_theme()
 
     # ── Play page ─────────────────────────────────────────────────────────────
 
@@ -266,8 +214,7 @@ class GeoQuestDockWidget(QDockWidget):
         self.streak_card = QLabel("")
         for card in (self.score_card, self.round_card, self.life_card, self.streak_card):
             card.setAlignment(Qt.AlignmentFlag.AlignCenter)
-            card.setStyleSheet("background:#fff;border:1px solid #dce3ed;border-radius:9px;"
-                               "padding:6px;font-weight:800;font-size:10pt")
+            card.setObjectName("statCard")
             stats.addWidget(card, 1)
         layout.addLayout(stats)
 
@@ -549,7 +496,7 @@ class GeoQuestDockWidget(QDockWidget):
 
         privacy = QLabel("🔒 Privacy by design · local data · no account · no CDN")
         privacy.setWordWrap(True)
-        privacy.setStyleSheet("color:#13795b;background:#e9fbf3;border-radius:8px;padding:9px")
+        privacy.setObjectName("privacyLabel")
         layout.addWidget(privacy)
 
         # Class mode
@@ -883,12 +830,13 @@ class GeoQuestDockWidget(QDockWidget):
         self._countdown_ms = max(0, self._countdown_ms - 100)
         self.timer_bar.setValue(self._countdown_ms)
         pct = self._countdown_ms / max(1, self._countdown_max_ms)
+        t = dock_color_tokens()
         if pct > 0.5:
-            chunk_color = "#6c4cff"
+            chunk_color = t["accent"]
         elif pct > 0.25:
             chunk_color = "#f59e0b"
         else:
-            chunk_color = "#ef4444"
+            chunk_color = t["wrong_color"]
         self.timer_bar.setStyleSheet(
             f"QProgressBar::chunk {{background:{chunk_color};border-radius:4px;}}")
         if self._countdown_ms <= 0:
@@ -969,12 +917,13 @@ class GeoQuestDockWidget(QDockWidget):
         elapsed = time.monotonic() - self._question_time
         result = self.session.answer(correct, elapsed=elapsed, closeness=closeness)
         correct = result["correct"]
-        color = "#13795b" if correct else "#c9344f"
+        t = dock_color_tokens()
+        color = t["correct_color"] if correct else t["wrong_color"]
         lead = self._t("correct") if correct else self._t("wrong")
         gained = f" +{result['gained']}" if result["gained"] else ""
         text = f"<span style='color:{color}'><b>{lead}{gained}</b></span>"
         if extra_feedback:
-            text = f"<span style='color:#6b7280'>{extra_feedback}</span> {text}"
+            text = f"<span style='color:{t['subtle']}'>{extra_feedback}</span> {text}"
         text += f"<br>{answer}"
         self.feedback.setText(text)
         self.feedback.setStyleSheet("")
@@ -1271,6 +1220,24 @@ class GeoQuestDockWidget(QDockWidget):
             PLUGIN_TITLE, f"{self._t('exported')}: {filename}")
 
     # ── Cleanup ───────────────────────────────────────────────────────────────
+
+    def changeEvent(self, event) -> None:
+        super().changeEvent(event)
+        if event.type() in (
+            QEvent.Type.PaletteChange,
+            QEvent.Type.ApplicationPaletteChange,
+        ):
+            self._apply_theme()
+
+    def _apply_theme(self) -> None:
+        root = self.widget()
+        if root is None or getattr(self, "_theme_refreshing", False):
+            return
+        self._theme_refreshing = True
+        try:
+            apply_adaptive_theme(root)
+        finally:
+            self._theme_refreshing = False
 
     def dispose(self) -> None:
         self._countdown_timer.stop()

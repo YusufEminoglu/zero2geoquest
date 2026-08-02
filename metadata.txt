@@ -3,7 +3,7 @@ name=02GeoQuest - Playable Map Studio
 qgisMinimumVersion=3.34
 qgisMaximumVersion=4.99
 description=Turn any vector layer into a polished geography game, classroom challenge or public-engagement quest.
-version=1.0.2
+version=1.0.3
 author=Yusuf Eminoglu
 email=yusuf.eminoglu@deu.edu.tr
 
@@ -23,4 +23,9 @@ hasProcessingProvider=no
 license=GPL-3
 
 changelog=
+    1.0.3 - Palette-aware adaptive theme.
+        Changed: replace the hardcoded stylesheet and inline colour literals with palette-derived tokens so the dock stays readable under QGIS light, dark and high-contrast themes. The dock now listens for PaletteChange and re-applies the theme automatically.
+    1.0.2 - Fix: ensure all eight game modes appear when their data requirements are met. Fix: ordering mode displays correct ranking answer. Fix: lives counter no longer goes negative. Fix: HTML export includes all eligible modes.
+    1.0.1 - Documentation: add README with quick-start and mode descriptions.
+    1.0.0 - Production release: eight polished game modes (Map Hunt, Value Duel, Distance Guess, Know the Shape, Attribute Guess, Ranking, Nearest Neighbour, Blind Zoom), difficulty levels with countdown timer, joker system, class profiles, leaderboard, and standalone offline HTML export.
     0.9.0 - Complete alpha: four game modes, quest builder, canvas interaction, scoring, leaderboard, bilingual UI and standalone offline HTML export.

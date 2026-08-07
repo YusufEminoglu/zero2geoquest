@@ -1,5 +1,9 @@
 # Changelog
 
+## [1.0.4] - 2026-08-07
+
+- Add comprehensive academic reference manual
+
 ## [1.0.3] - 2026-08-03
 
 ### Changed

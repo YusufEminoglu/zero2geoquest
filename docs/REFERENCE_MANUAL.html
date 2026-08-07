@@ -1,0 +1,208 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>02GeoQuest &mdash; Reference Manual</title>
+<style>
+:root {--bg:#fafaf8;--sidebar-bg:#f3f3f0;--text:#1a1a1a;--muted:#5a5a55;--accent:#2a6e5e;--border:#d8d5ce;--card-bg:#fff;--link:#1a6e5e;--code-bg:#edf4f2;--search-bg:#fff}
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:"Segoe UI",system-ui,-apple-system,sans-serif;background:var(--bg);color:var(--text);line-height:1.6;display:flex;min-height:100vh}
+#sidebar{width:270px;min-width:270px;background:var(--sidebar-bg);border-right:1px solid var(--border);padding:24px 20px;position:sticky;top:0;height:100vh;overflow-y:auto}
+#sidebar h2{font-size:13px;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);margin-bottom:10px}
+#search{width:100%;padding:8px 12px;border:1px solid var(--border);border-radius:6px;font-size:13px;background:var(--search-bg);margin-bottom:20px}
+#sidebar nav a{display:block;padding:5px 0;font-size:13px;color:var(--link);text-decoration:none}
+#sidebar nav a:hover{text-decoration:underline}
+#sidebar nav a.sub{padding-left:14px;font-size:12px}
+#main{flex:1;padding:40px 48px;max-width:860px}
+h1{font-size:28px;font-weight:700;color:var(--accent);margin-bottom:4px}
+h1+p{color:var(--muted);margin-bottom:32px}
+h2{font-size:20px;font-weight:600;color:var(--accent);margin:36px 0 12px;padding-bottom:6px;border-bottom:2px solid var(--border)}
+h3{font-size:16px;font-weight:600;color:var(--text);margin:20px 0 8px}
+p,li{font-size:14px;color:var(--text)}
+p{margin-bottom:10px}
+.card{background:var(--card-bg);border:1px solid var(--border);border-radius:8px;padding:16px;margin-bottom:14px}
+.card h4{font-size:14px;font-weight:600;color:var(--accent);margin-bottom:6px}
+ul{margin:4px 0 10px 20px}
+li{margin-bottom:3px}
+code{font-family:Consolas,'Courier New',monospace;background:var(--code-bg);padding:1px 6px;border-radius:3px;font-size:13px}
+table{width:100%;border-collapse:collapse;margin:12px 0;font-size:13px}
+th,td{border:1px solid var(--border);padding:8px 12px;text-align:left}
+th{background:var(--code-bg);font-weight:600}
+.refs{font-size:12px;color:var(--muted)}
+.refs a{color:var(--link)}
+@media(max-width:760px){body{flex-direction:column}#sidebar{width:100%;min-width:auto;height:auto;position:static;border-right:none;border-bottom:1px solid var(--border)}#main{padding:24px}}
+.hidden{display:none}
+</style>
+</head>
+<body>
+<aside id="sidebar">
+  <input type="text" id="search" placeholder="Search manual&hellip;" autocomplete="off">
+  <h2>Contents</h2>
+  <nav id="toc">
+    <a href="#overview">Overview</a>
+    <a href="#modes" class="sub">Game Modes</a>
+    <a href="#difficulty" class="sub">Difficulty Levels</a>
+    <a href="#jokers" class="sub">Jokers</a>
+    <a href="#scoring" class="sub">Scoring Engine</a>
+    <a href="#params" class="sub">Builder Controls</a>
+    <a href="#workflow" class="sub">Workflow</a>
+    <a href="#classmode" class="sub">Class Mode</a>
+    <a href="#export" class="sub">HTML Export</a>
+    <a href="#technical" class="sub">Technical Notes</a>
+    <a href="#literature">Literature</a>
+  </nav>
+</aside>
+<main id="main">
+<h1>02GeoQuest</h1>
+<p>Playable Map Studio &mdash; turn any QGIS vector layer into an educational quiz game &bull; v1.0.3</p>
+
+<h2 id="overview">1. Overview</h2>
+<p>02GeoQuest transforms QGIS vector layers into interactive geography games, educational quizzes, data-familiarisation tools, and public-engagement challenges. It features 8 game modes, 3 difficulty levels, 3 joker types, a persistent leaderboard, a full class-mode with student profiles and CSV export, and a self-contained offline HTML game exporter. The entire system operates locally inside QGIS with zero external dependencies, no API keys, no accounts, and no pip-installed packages.</p>
+<p>The plugin is a dock-based quiz studio with four pages: <strong>Play</strong> (the active game), <strong>Builder</strong> (configuration), <strong>Scores</strong> (leaderboard), and <strong>Share</strong> (HTML export and class mode).</p>
+
+<h2 id="modes">2. Game Modes</h2>
+<table>
+  <tr><th>Mode</th><th>Description</th><th>Requires</th><th>HTML Export</th></tr>
+  <tr><td><strong>Map Hunt</strong> ("locate")</td><td>Click the named feature on the QGIS canvas</td><td>Any features</td><td>&mdash;</td></tr>
+  <tr><td><strong>Value Duel</strong> ("bigger")</td><td>Two features: pick the one with the larger numeric value</td><td>Numeric field</td><td>Yes</td></tr>
+  <tr><td><strong>Distance Guess</strong> ("distance")</td><td>Estimate the ground distance between two places</td><td>Geographic centroids</td><td>Yes</td></tr>
+  <tr><td><strong>Know the Shape</strong> ("silhouette")</td><td>Identify a polygon feature from its simplified outline</td><td>4+ polygons</td><td>Yes</td></tr>
+  <tr><td><strong>Attribute Guess</strong> ("attr_guess")</td><td>Estimate a numeric attribute via a slider</td><td>2+ numeric values</td><td>Yes</td></tr>
+  <tr><td><strong>Ranking</strong> ("ordering")</td><td>Order 3&ndash;4 features from highest to lowest value</td><td>3+ distinct values</td><td>Yes</td></tr>
+  <tr><td><strong>Nearest Neighbour</strong> ("nearest")</td><td>Identify which feature is closest to a reference</td><td>4+ valid records</td><td>Yes</td></tr>
+  <tr><td><strong>Blind Zoom</strong> ("blind_zoom")</td><td>Canvas zooms to a feature; name it</td><td>2+ records</td><td>&mdash;</td></tr>
+</table>
+<p>Map Hunt and Blind Zoom are excluded from HTML export because they require QGIS canvas interaction.</p>
+
+<h2 id="difficulty">3. Difficulty Levels</h2>
+<table>
+  <tr><th>Level</th><th>Timer</th><th>Choices</th><th>Tolerance</th></tr>
+  <tr><td>Easy</td><td>60 s</td><td>3</td><td>0.40</td></tr>
+  <tr><td>Medium</td><td>30 s</td><td>4</td><td>0.25</td></tr>
+  <tr><td>Hard</td><td>15 s</td><td>6</td><td>0.10</td></tr>
+</table>
+<p>Tolerance governs the acceptable error ratio for distance guesses and attribute slider estimates. A tolerance of 0.25 means the estimate must be within &plusmn;25% of the true value.</p>
+
+<h2 id="jokers">4. Jokers</h2>
+<div class="card">
+  <h4>Three Joker Types, Each Usable Once Per Quest</h4>
+  <ul>
+    <li><strong>Eliminate:</strong> Removes 2 wrong multiple-choice options. Available in: Value Duel, Silhouette, Nearest Neighbour, Blind Zoom.</li>
+    <li><strong>Value Hint:</strong> Narrows a slider or spinbox range by 50% around its midpoint. Available in: Attribute Guess, Distance Guess.</li>
+    <li><strong>Map Hint:</strong> Zooms the canvas to a wider hint area (2.5&times; the feature's bounding box). Available in: Map Hunt.</li>
+  </ul>
+  <p>Default joker pool: 3 total (configurable 0&ndash;9).</p>
+</div>
+
+<h2 id="scoring">5. Scoring Engine</h2>
+<p>Points are computed per answer as:</p>
+<ul>
+  <li><strong>Base:</strong> 500 points</li>
+  <li><strong>Speed bonus:</strong> max(0, 150 &minus; elapsed_seconds &times; 8)</li>
+  <li><strong>Streak bonus:</strong> min(300, max(0, streak &minus; 1) &times; 30)</li>
+  <li><strong>Closeness multiplier:</strong> clamped to [0.25, 1.0]; rewards near-misses for slider/distance modes</li>
+  <li><strong>Total:</strong> int((500 + speed_bonus + streak_bonus) &times; closeness)</li>
+</ul>
+<p>Timed-out answers are automatically wrong regardless of correctness. The game ends when rounds are exhausted or lives reach zero. The session summary includes: total score, rounds played, correct count, accuracy percentage, best streak, lives remaining, and total duration.</p>
+
+<h2 id="params">6. Builder Controls</h2>
+<table>
+  <tr><th>Section</th><th>Control</th><th>Options</th></tr>
+  <tr><td>Source Layer</td><td>Layer picker, label field, numeric field</td><td>Single vector layer (layer A)</td></tr>
+  <tr><td>Second Layer</td><td>Checkbox toggle, duplicate controls</td><td>Optional cross-layer play (layer B)</td></tr>
+  <tr><td>Challenge Mix</td><td>8 checkboxes</td><td>Modes auto-filtered by data availability</td></tr>
+  <tr><td>Difficulty</td><td>Three toggle buttons (Easy / Medium / Hard)</td><td>Affects timer, choices, tolerance</td></tr>
+  <tr><td>Quest Rules</td><td>Title combo with presets, rounds (3&ndash;60), lives (1&ndash;10), jokers (0&ndash;9)</td><td>Preset titles: My Map Quest, City Explorer, Data Detective, etc.</td></tr>
+</table>
+
+<h2 id="workflow">7. Workflow Guide</h2>
+<ol>
+  <li>Open the 02GeoQuest dock from the toolbar.</li>
+  <li>On the <strong>Builder</strong> tab, select a vector layer. Optionally add a second layer for cross-layer play.</li>
+  <li>Choose a label field (for display names) and an optional numeric field (for value-based modes).</li>
+  <li>Select game modes from the 8 checkboxes. Modes lacking sufficient data are auto-greyed.</li>
+  <li>Set difficulty and quest rules (rounds, lives, jokers).</li>
+  <li>Click <em>Start the quest</em>. The dock switches to the <strong>Play</strong> page.</li>
+  <li>Questions appear in sequence with the appropriate input widget (multiple-choice buttons, slider, spinbox, or map pick).</li>
+  <li>The timer bar changes colour at 50% (yellow) and 25% (red). Use jokers as needed.</li>
+  <li>After the last round or when lives reach zero, the final score is saved to the leaderboard.</li>
+</ol>
+
+<h2 id="classmode">8. Class Mode and Student Profiles</h2>
+<div class="card">
+  <h4>Teacher Tools</h4>
+  <p><strong>Student profiles:</strong> Create named profiles with emoji avatars (10 choices: map, cityscape, globe, compass, pin, mountain, wave, leaf, star, fire). Profiles are stored as JSON in QgsSettings.</p>
+  <p><strong>Session tracking:</strong> Select an active profile before playing; each completed quest is logged with player name, avatar, quest title, difficulty, score, accuracy, best streak, correct count, rounds, duration, and date. Sessions persist across QGIS restarts (last 300 sessions retained).</p>
+  <p><strong>CSV export:</strong> Export all sessions to a UTF-8 BOM CSV file for grading and record-keeping via standard <code>csv.DictWriter</code>.</p>
+</div>
+
+<h2 id="export">9. Offline HTML Game Export</h2>
+<div class="card">
+  <h4>Self-Contained, Zero-Dependency HTML</h4>
+  <p>Exports a single HTML file with an embedded JavaScript game engine that fully reimplements the question generation and scoring logic. Excludes Map Hunt and Blind Zoom modes. Features: dark mode with CSS custom properties and localStorage persistence, responsive single-column layout below 560 px, score animation with CSS keyframes, progress dots (violet=pending, green=correct, red=wrong), ranking via Up/Down buttons, results screen with replay, and XSS-safe JSON embedding (angle brackets escaped to Unicode sequences). Zero CDN, zero network calls, zero tracking.</p>
+</div>
+
+<h2 id="technical">10. Technical Notes</h2>
+<ul>
+  <li><strong>Pure-Python core:</strong> The game engine, question factory, scoring, and profile manager have zero QGIS imports and are independently testable with plain CPython.</li>
+  <li><strong>LCG-based PRNG:</strong> A Knuth MMIX linear congruential generator (state 32-bit, seed from <code>time.time_ns()</code>) avoids stdlib <code>random</code> to keep QGIS Hub Bandit B311 scans clean.</li>
+  <li><strong>Layer data serialisation:</strong> Features are immediately serialised to plain dictionaries with no QGIS object references held, keeping memory predictable and enabling pure-Python tests.</li>
+  <li><strong>Question factory:</strong> Maintains an 8-deep short-term memory of recent feature combinations to avoid repeats; pre-computes all valid pairs, distance pairs, and nearest-neighbour options on construction.</li>
+  <li><strong>Adaptive theme:</strong> All UI colours derive from the active Qt <code>QPalette</code> with WCAG 4.5:1 contrast compliance. Reapplies on <code>PaletteChange</code> and <code>ApplicationPaletteChange</code> events.</li>
+  <li><strong>QGIS compatibility:</strong> 3.34 through 4.x. Dual Qt5/Qt6 support via try/except for <code>QAction</code> import location.</li>
+</ul>
+
+<h2 id="literature">11. Literature</h2>
+<ol class="refs">
+  <li>Prensky, M. (2001). <em>Digital Game-Based Learning</em>. McGraw-Hill.</li>
+  <li>Gee, J. P. (2003). What video games have to teach us about learning and literacy. <em>Computers in Entertainment</em>, 1(1), 20. <a href="https://doi.org/10.1145/950566.950595">DOI: 10.1145/950566.950595</a></li>
+  <li>Hamari, J., Koivisto, J., &amp; Sarsa, H. (2014). Does gamification work? &mdash; A literature review of empirical studies on gamification. <em>Proceedings of the 47th Hawaii International Conference on System Sciences</em>, 3025&ndash;3034. <a href="https://doi.org/10.1109/HICSS.2014.377">DOI: 10.1109/HICSS.2014.377</a></li>
+  <li>Kapp, K. M. (2012). <em>The Gamification of Learning and Instruction: Game-Based Methods and Strategies for Training and Education</em>. Pfeiffer.</li>
+</ol>
+</main>
+<script>
+(function(){
+  var inp=document.getElementById('search');
+  var main=document.getElementById('main');
+  if(!inp||!main)return;
+  var all=main.querySelectorAll('h2,h3,p,li,td');
+  inp.addEventListener('input',function(){
+    var q=inp.value.trim().toLowerCase();
+    all.forEach(function(el){el.classList.remove('hidden');});
+    if(!q)return;
+    var sections=main.querySelectorAll('h2');
+    sections.forEach(function(h){
+      var next=h.nextElementSibling;
+      var keep=h.textContent.toLowerCase().indexOf(q)!==-1;
+      while(next && next.tagName!=='H2'){
+        if(next.textContent.toLowerCase().indexOf(q)!==-1)keep=true;
+        next=next.nextElementSibling;
+      }
+      if(!keep){
+        next=h.nextElementSibling;
+        while(next && next.tagName!=='H2'){next.classList.add('hidden');next=next.nextElementSibling;}
+        h.classList.add('hidden');
+      }
+    });
+  });
+})();
+</script>
+
+<!-- PDF PRINT BUTTON -->
+<style>
+#print-pdf-btn {
+  position: fixed; bottom: 24px; right: 24px; z-index: 9999;
+  background: #13a0a0; color: white; border: none; border-radius: 8px;
+  padding: 10px 18px; font-size: 14px; font-weight: 600; cursor: pointer;
+  box-shadow: 0 4px 14px rgba(0,0,0,.2); transition: all .2s;
+  display: flex; align-items: center; gap: 8px;
+}
+#print-pdf-btn:hover { background: #0d7a7a; transform: translateY(-2px); box-shadow: 0 6px 20px rgba(0,0,0,.25); }
+@media print { #print-pdf-btn { display: none !important; } }
+@media (max-width: 768px) { #print-pdf-btn { bottom: 12px; right: 12px; padding: 8px 14px; font-size: 12px; } }
+</style>
+<button id="print-pdf-btn" onclick="window.print()" title="Save as PDF / Print">🖨️ Save as PDF</button>
+
+</body>
+</html>

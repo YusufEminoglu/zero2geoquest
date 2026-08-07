@@ -5,6 +5,11 @@ Turn any QGIS vector dataset into an interactive geography game, teaching activi
 
 ---
 
+## 📖 Documentation
+
+**[Comprehensive Academic Reference Manual](https://yusufeminoglu.github.io/zero2geoquest/)** — complete documentation of every feature, parameter, and workflow. Hosted on GitHub Pages.
+
+
 ## 🎮 What You Can Play (8 Modes)
 
 - 📍 **Map Hunt:** Find requested features directly on the live QGIS map canvas.

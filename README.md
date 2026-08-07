@@ -1,4 +1,5 @@
 # 02GeoQuest — Playable Map Studio
+[![Documentation](https://img.shields.io/badge/📖_Reference_Manual-13a0a0)](https://yusufeminoglu.github.io/zero2geoquest/)
 
 Turn any QGIS vector dataset into an interactive geography game, teaching activity, data-familiarisation exercise, or public engagement quest.
 

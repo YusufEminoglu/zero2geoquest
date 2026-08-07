@@ -1,5 +1,9 @@
 # Changelog
 
+## [1.0.6] - 2026-08-07
+
+- Added online user manual link (https://yusufeminoglu.github.io/zero2geoquest/) and GitHub repository star call-to-action.
+
 ## [1.0.5] - 2026-08-07
 
 - Add floating Save as PDF button to reference manual

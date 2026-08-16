@@ -33,6 +33,9 @@ th{background:var(--code-bg);font-weight:600}
 .refs a{color:var(--link)}
 @media(max-width:760px){body{flex-direction:column}#sidebar{width:100%;min-width:auto;height:auto;position:static;border-right:none;border-bottom:1px solid var(--border)}#main{padding:24px}}
 .hidden{display:none}
+
+.video-embed { position: relative; width: 100%; padding-top: 56.25%; margin: 4px 0 28px; border-radius: 8px; overflow: hidden; border: 1px solid var(--border, #ccc); background: #000; }
+.video-embed iframe { position: absolute; inset: 0; width: 100%; height: 100%; border: 0; }
 </style>
 </head>
 <body>
@@ -56,6 +59,10 @@ th{background:var(--code-bg);font-weight:600}
 <main id="main">
 <h1>02GeoQuest</h1>
 <p>Playable Map Studio &mdash; turn any QGIS vector layer into an educational quiz game &bull; v1.0.3</p>
+<div class="video-embed">
+  <iframe src="https://www.youtube-nocookie.com/embed/YW1386S2ey0" title="02GeoQuest &mdash; video walkthrough" loading="lazy" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share" allowfullscreen></iframe>
+</div>
+
 
 <h2 id="overview">1. Overview</h2>
 <p>02GeoQuest transforms QGIS vector layers into interactive geography games, educational quizzes, data-familiarisation tools, and public-engagement challenges. It features 8 game modes, 3 difficulty levels, 3 joker types, a persistent leaderboard, a full class-mode with student profiles and CSV export, and a self-contained offline HTML game exporter. The entire system operates locally inside QGIS with zero external dependencies, no API keys, no accounts, and no pip-installed packages.</p>

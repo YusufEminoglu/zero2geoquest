@@ -10,7 +10,7 @@ Turn any QGIS vector dataset into an interactive geography game, teaching activi
 **[Comprehensive Academic Reference Manual](https://yusufeminoglu.github.io/zero2geoquest/)** — complete documentation of every feature, parameter, and workflow. Hosted on GitHub Pages.
 
 
-## 🎮 What You Can Play (8 Modes)
+## 🎮 What You Can Play (9 Modes)
 
 - 📍 **Map Hunt:** Find requested features directly on the live QGIS map canvas.
 - ⚖️ **Value Duel:** Compare two features to determine which has the larger numeric value or area.
@@ -20,6 +20,14 @@ Turn any QGIS vector dataset into an interactive geography game, teaching activi
 - 📊 **Ranking:** Order 3–4 features from highest to lowest value via drag-and-drop.
 - 🧭 **Nearest Neighbour:** Determine which feature is geographically closest to a reference location.
 - 🔍 **Blind Zoom:** Identify a feature when the map canvas automatically zooms to it.
+- 🧭 **Compass Quest:** Test forward geodetic azimuths and cardinal directions (N, NE, E, SE, S, SW, W, NW).
+
+---
+
+## 📦 Quest Packs & 📜 Certificates
+
+- **Quest Pack Import/Export:** Save custom quests as portable JSON (`.json`) files with validation, or load the 3 built-in starter packs (*World Capitals*, *European Landmarks*, *Global Megacities*).
+- **Geographic Intelligence Certificates:** Generate printable, responsive standalone HTML achievement certificates with dynamic rank assessment badges based on score tiers.
 
 ---
 

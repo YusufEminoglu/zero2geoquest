@@ -15,6 +15,7 @@ MODES = (
     "ordering",     # drag 3-4 features into correct value order
     "nearest",      # which feature is closest to the reference?
     "blind_zoom",   # canvas zoomed to a feature, name it
+    "direction",    # compass direction between two features
 )
 
 DIFFICULTY: dict[str, dict] = {
@@ -181,6 +182,50 @@ def _distance_m(a: dict, b: dict) -> float:
     return 6_371_008.8 * 2 * math.asin(min(1.0, math.sqrt(h)))
 
 
+COMPASS_DIRECTIONS = (
+    ("North", 0),
+    ("North-East", 45),
+    ("East", 90),
+    ("South-East", 135),
+    ("South", 180),
+    ("South-West", 225),
+    ("West", 270),
+    ("North-West", 315),
+)
+
+
+def _bearing_deg(a: dict, b: dict) -> float:
+    """Forward geodetic azimuth in degrees (0..360) from centroid A to centroid B."""
+    lon1, lat1 = (math.radians(float(v)) for v in a["centroid"])
+    lon2, lat2 = (math.radians(float(v)) for v in b["centroid"])
+    dlon = lon2 - lon1
+    y = math.sin(dlon) * math.cos(lat2)
+    x = math.cos(lat1) * math.sin(lat2) - math.sin(lat1) * math.cos(lat2) * math.cos(dlon)
+    bearing = (math.degrees(math.atan2(y, x)) + 360.0) % 360.0
+    return bearing
+
+
+def compass_direction(bearing_deg: float) -> tuple[str, int]:
+    """Map azimuth in degrees to 8-point compass direction name and nominal angle."""
+    b = bearing_deg % 360.0
+    if b >= 337.5 or b < 22.5:
+        return "North", 0
+    elif 22.5 <= b < 67.5:
+        return "North-East", 45
+    elif 67.5 <= b < 112.5:
+        return "East", 90
+    elif 112.5 <= b < 157.5:
+        return "South-East", 135
+    elif 157.5 <= b < 202.5:
+        return "South", 180
+    elif 202.5 <= b < 247.5:
+        return "South-West", 225
+    elif 247.5 <= b < 292.5:
+        return "West", 270
+    else:
+        return "North-West", 315
+
+
 # ── Question factory ──────────────────────────────────────────────────────────
 
 
@@ -257,6 +302,8 @@ class QuestionFactory:
             elif mode == "nearest" and nearest_options:
                 available.append(mode)
             elif mode == "blind_zoom" and len(self.records) >= 2:
+                available.append(mode)
+            elif mode == "direction" and distance_pairs:
                 available.append(mode)
         return available
 
@@ -414,6 +461,31 @@ class QuestionFactory:
                 "target_fid": target["fid"],
                 "bbox_wgs84": target.get("bbox_wgs84", []),
                 "target_layer_id": target.get("layer_id"),
+            }
+
+        # ── direction ────────────────────────────────────────────────────────
+        if mode == "direction":
+            pairs = self._distance_pairs()
+            if not pairs:
+                raise ValueError("Compass Quest requires two distinct feature locations.")
+            a, b = self.rng.choice(pairs)
+            bearing = _bearing_deg(a, b)
+            ans_dir, ans_deg = compass_direction(bearing)
+            ans_label = f"{ans_dir} ({ans_deg}°)"
+            all_options = [f"{name} ({deg}°)" for name, deg in COMPASS_DIRECTIONS]
+            decoys = [opt for opt in all_options if opt != ans_label]
+            sampled_decoys = self.rng.sample(decoys, min(n_choices - 1, len(decoys)))
+            choices = self.rng.shuffled([ans_label] + sampled_decoys)
+            return {
+                "mode": mode,
+                "prompt": f"In which compass direction is {_label(b)} relative to {_label(a)}?",
+                "from": _label(a),
+                "to": _label(b),
+                "choices": choices,
+                "answer": ans_label,
+                "bearing_deg": round(bearing, 1),
+                "from_centroid": a.get("centroid", []),
+                "to_centroid": b.get("centroid", []),
             }
 
         raise ValueError(f"Unknown game mode: {mode!r}")

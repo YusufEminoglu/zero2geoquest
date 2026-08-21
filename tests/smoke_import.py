@@ -46,6 +46,8 @@ check("core.layer_data",  lambda: __import__("zero2geoquest.core.layer_data",  f
 check("core.game",        lambda: __import__("zero2geoquest.core.game",        fromlist=[""]))
 check("core.exporter",    lambda: __import__("zero2geoquest.core.exporter",    fromlist=[""]))
 check("core.profiles",    lambda: __import__("zero2geoquest.core.profiles",    fromlist=[""]))
+check("core.quest_pack",  lambda: __import__("zero2geoquest.core.quest_pack",  fromlist=[""]))
+check("core.certificate", lambda: __import__("zero2geoquest.core.certificate", fromlist=[""]))
 check("tools.pick",       lambda: __import__("zero2geoquest.tools.pick",       fromlist=[""]))
 check("dialogs.dock",     lambda: __import__("zero2geoquest.dialogs.dock",     fromlist=[""]))
 check("main_plugin",      lambda: __import__("zero2geoquest.main_plugin",      fromlist=[""]))
@@ -55,7 +57,7 @@ def _game_engine():
     from zero2geoquest.core.game import (
         MODES, DIFFICULTY, LCG, Joker, QuestionFactory, GameSession
     )
-    assert len(MODES) == 8, f"Expected 8 modes, got {len(MODES)}"
+    assert len(MODES) == 9, f"Expected 9 modes, got {len(MODES)}"
     assert set(DIFFICULTY.keys()) == {"Easy", "Medium", "Hard"}
     # LCG determinism
     rng = LCG(42)
@@ -82,7 +84,7 @@ def _game_engine():
     ]
     factory = QuestionFactory(records, seed=42)
     for mode in ("locate", "bigger", "distance", "silhouette",
-                 "attr_guess", "ordering", "nearest", "blind_zoom"):
+                 "attr_guess", "ordering", "nearest", "blind_zoom", "direction"):
         q = factory.make(mode, "Medium")
         assert q["mode"] == mode, f"make({mode}) returned wrong mode"
         assert "prompt" in q, f"make({mode}) missing prompt"

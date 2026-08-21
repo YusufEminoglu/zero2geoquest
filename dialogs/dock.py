@@ -21,10 +21,12 @@ from qgis.core import (
 )
 from qgis.gui import QgsFieldComboBox, QgsHighlight, QgsMapLayerComboBox
 
+from ..core.certificate import generate_certificate_html
 from ..core.exporter import HTML_MODES, write_html
 from ..core.game import DIFFICULTY, MODES, GameSession, QuestionFactory
 from ..core.layer_data import feature_at_point, merge_layers, records_from_layer
 from ..core.profiles import AVATARS, ProfileManager
+from ..core.quest_pack import STARTER_PACKS, export_pack, import_pack
 from .theme import apply_adaptive_theme, dock_color_tokens
 
 PLUGIN_TITLE = "02GeoQuest — Playable Map Studio"
@@ -40,6 +42,7 @@ MODE_LABELS = {
     "ordering":   "Ranking ✦",
     "nearest":    "Nearest Neighbour",
     "blind_zoom": "Blind Zoom",
+    "direction":  "Compass Quest 🧭",
 }
 MODE_DESC = {
     "locate":     "Click the requested feature on the live map",
@@ -50,6 +53,7 @@ MODE_DESC = {
     "ordering":   "Rank 3–4 features by value  ← needs value field",
     "nearest":    "Which feature is closest to the reference?",
     "blind_zoom": "Canvas zooms to a feature — name it",
+    "direction":  "Estimate compass direction / bearing between two places",
 }
 
 # ── Silhouette preview widget ─────────────────────────────────────────────────
@@ -469,8 +473,11 @@ class GeoQuestDockWidget(QDockWidget):
         self.score_list = QListWidget()
         layout.addWidget(self.score_list, 1)
         btns = QHBoxLayout()
+        cert_btn = QPushButton("📜 Export Certificate (HTML)…")
+        cert_btn.clicked.connect(self._export_certificate)
         clear = QPushButton("Clear leaderboard")
         clear.clicked.connect(self._clear_scores)
+        btns.addWidget(cert_btn, 1)
         btns.addWidget(clear)
         layout.addLayout(btns)
         self._refresh_scores()
@@ -493,6 +500,34 @@ class GeoQuestDockWidget(QDockWidget):
         self.export_button.clicked.connect(self._export_html)
         export_v.addWidget(self.export_button)
         layout.addWidget(export_box)
+
+        # Quest Packs section
+        pack_box = QGroupBox("Quest Packs & Curated Trivia")
+        pack_v = QVBoxLayout(pack_box)
+        pack_desc = QLabel("Export current layer snapshot as a portable trivia bundle, or load curated starter packs.")
+        pack_desc.setWordWrap(True)
+        pack_desc.setStyleSheet("color:#718096;font-size:8pt")
+        pack_v.addWidget(pack_desc)
+
+        starter_row = QHBoxLayout()
+        self.starter_pack_combo = QComboBox()
+        for p_name in STARTER_PACKS:
+            self.starter_pack_combo.addItem(p_name)
+        starter_row.addWidget(self.starter_pack_combo, 1)
+        load_starter_btn = QPushButton("Load Starter")
+        load_starter_btn.clicked.connect(self._load_starter_pack)
+        starter_row.addWidget(load_starter_btn)
+        pack_v.addLayout(starter_row)
+
+        pack_btn_row = QHBoxLayout()
+        export_pack_btn = QPushButton("💾 Export Pack (.geoquest.json)…")
+        export_pack_btn.clicked.connect(self._export_quest_pack)
+        import_pack_btn = QPushButton("📂 Import Pack…")
+        import_pack_btn.clicked.connect(self._import_quest_pack)
+        pack_btn_row.addWidget(export_pack_btn)
+        pack_btn_row.addWidget(import_pack_btn)
+        pack_v.addLayout(pack_btn_row)
+        layout.addWidget(pack_box)
 
         privacy = QLabel("🔒 Privacy by design · local data · no account · no CDN")
         privacy.setWordWrap(True)
@@ -1218,6 +1253,91 @@ class GeoQuestDockWidget(QDockWidget):
             return
         self.iface.messageBar().pushSuccess(
             PLUGIN_TITLE, f"{self._t('exported')}: {filename}")
+
+    def _export_certificate(self) -> None:
+        scores = self._scores()
+        if not scores:
+            QMessageBox.information(self, PLUGIN_TITLE, "Play and complete at least one quest first!")
+            return
+        best = scores[0]
+        player_name = "Master Explorer"
+        if getattr(self, "_active_profile", None):
+            player_name = f"{self._active_profile[1]} {self._active_profile[0]}"
+        html_content = generate_certificate_html(
+            best, player_name=player_name, quest_title=str(best.get("title", "Spatial Quest")))
+        filename, _ = QFileDialog.getSaveFileName(
+            self, "Save Certificate", f"GeoQuest_Certificate_{player_name.replace(' ', '_')}.html",
+            "HTML Certificate (*.html)")
+        if not filename:
+            return
+        if not filename.lower().endswith(".html"):
+            filename += ".html"
+        try:
+            with open(filename, "w", encoding="utf-8") as f:
+                f.write(html_content)
+            self.iface.messageBar().pushSuccess(
+                PLUGIN_TITLE, f"Certificate exported: {filename}")
+        except OSError as exc:
+            QMessageBox.critical(self, PLUGIN_TITLE, str(exc))
+
+    def _export_quest_pack(self) -> None:
+        if not self._prepare_records():
+            self._show_page(1)
+            return
+        filename, _ = QFileDialog.getSaveFileName(
+            self, "Export Quest Pack",
+            self.quest_title.currentText().replace(" ", "_") + ".geoquest.json",
+            "Quest Pack (*.geoquest.json *.json)")
+        if not filename:
+            return
+        if not filename.lower().endswith(".json"):
+            filename += ".geoquest.json"
+        try:
+            export_pack(
+                filename,
+                title=self.quest_title.currentText(),
+                description=f"Exported from {self.layer_combo.currentText()}",
+                records=self.records,
+                modes=self._active_modes,
+                difficulty=self._difficulty,
+            )
+            self.iface.messageBar().pushSuccess(
+                PLUGIN_TITLE, f"Quest Pack saved: {filename}")
+        except Exception as exc:
+            QMessageBox.critical(self, PLUGIN_TITLE, f"Failed to export pack: {exc}")
+
+    def _import_quest_pack(self) -> None:
+        filename, _ = QFileDialog.getOpenFileName(
+            self, "Import Quest Pack", "", "Quest Pack (*.geoquest.json *.json)")
+        if not filename:
+            return
+        try:
+            pack_data = import_pack(filename)
+            self._apply_pack_data(pack_data)
+        except Exception as exc:
+            QMessageBox.critical(self, PLUGIN_TITLE, f"Failed to import pack: {exc}")
+
+    def _load_starter_pack(self) -> None:
+        pack_name = self.starter_pack_combo.currentText()
+        pack_data = STARTER_PACKS.get(pack_name)
+        if not pack_data:
+            return
+        self._apply_pack_data(pack_data)
+
+    def _apply_pack_data(self, pack_data: dict) -> None:
+        title = str(pack_data.get("title", "Custom Quest"))
+        self.quest_title.setCurrentText(title)
+        self.records = list(pack_data.get("records", []))
+        self.factory = QuestionFactory(self.records)
+        diff = str(pack_data.get("difficulty", "Medium"))
+        if diff in self.diff_buttons:
+            self._set_difficulty(diff)
+        modes = pack_data.get("modes", [])
+        for mode, check in self.mode_checks.items():
+            check.setChecked(mode in modes if modes else True)
+        self.iface.messageBar().pushSuccess(
+            PLUGIN_TITLE, f"Loaded Quest Pack '{title}' ({len(self.records)} features)")
+        self.start_game()
 
     # ── Cleanup ───────────────────────────────────────────────────────────────
 

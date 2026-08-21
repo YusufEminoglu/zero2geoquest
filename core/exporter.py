@@ -13,7 +13,7 @@ def available_html_modes(records: list[dict], modes: list[str]) -> list[str]:
     return QuestionFactory(records).available_modes(selected)
 
 # Modes supported in offline HTML (locate and blind_zoom need QGIS canvas)
-HTML_MODES = ("bigger", "distance", "silhouette", "attr_guess", "ordering", "nearest")
+HTML_MODES = ("bigger", "distance", "silhouette", "attr_guess", "ordering", "nearest", "direction")
 
 
 def _safe_json(value) -> str:
@@ -145,6 +145,7 @@ const T={{
   locate:'Map Hunt',bigger:'Value Duel',distance:'Distance Guess',
   silhouette:'Know the Shape',attr_guess:'Attribute Guess',
   ordering:'Ranking',nearest:'Nearest Neighbour',blind_zoom:'Blind Zoom',
+  direction:'Compass Quest',
   greater:'Which one has the greater value?',
   shape:'Whose silhouette is this?',
   nearest_q:'Which feature is closest to',
@@ -172,6 +173,9 @@ const pointOf=record=>{{const p=record.centroid;if(!Array.isArray(p)||p.length<2
 const distinct=(a,b)=>Math.abs(a-b)>Math.max(1e-12,Math.max(Math.abs(a),Math.abs(b))*1e-12);
 function comparisonValue(record){{const value=finite(record.value);return value===null?finite(record.area):value;}}
 function distanceM(first,second){{const a=pointOf(first),b=pointOf(second);if(!a||!b)return NaN;const rad=Math.PI/180,lat1=a[1]*rad,lat2=b[1]*rad,dlat=(b[1]-a[1])*rad,dlon=(b[0]-a[0])*rad;const h=Math.sin(dlat/2)**2+Math.cos(lat1)*Math.cos(lat2)*Math.sin(dlon/2)**2;return 12742017.6*Math.asin(Math.min(1,Math.sqrt(h)));}}
+function bearingDeg(first,second){{const a=pointOf(first),b=pointOf(second);if(!a||!b)return NaN;const rad=Math.PI/180,lat1=a[1]*rad,lat2=b[1]*rad,dlon=(b[0]-a[0])*rad;const y=Math.sin(dlon)*Math.cos(lat2);const x=Math.cos(lat1)*Math.sin(lat2)-Math.sin(lat1)*Math.cos(lat2)*Math.cos(dlon);return(Math.atan2(y,x)*180/Math.PI+360)%360;}}
+const DIRS=[['North',0],['North-East',45],['East',90],['South-East',135],['South',180],['South-West',225],['West',270],['North-West',315]];
+function compassDir(deg){{const d=deg%360;if(d>=337.5||d<22.5)return['North',0];if(d>=22.5&&d<67.5)return['North-East',45];if(d>=67.5&&d<112.5)return['East',90];if(d>=112.5&&d<157.5)return['South-East',135];if(d>=157.5&&d<202.5)return['South',180];if(d>=202.5&&d<247.5)return['South-West',225];if(d>=247.5&&d<292.5)return['West',270];return['North-West',315];}}
 function valuePairs(){{const pairs=[];for(let i=0;i<G.records.length;i++){{const first=G.records[i],firstValue=comparisonValue(first);if(firstValue===null)continue;for(let j=i+1;j<G.records.length;j++){{const second=G.records[j],secondValue=comparisonValue(second);if(secondValue!==null&&distinct(firstValue,secondValue))pairs.push([first,second,firstValue,secondValue]);}}}}return pairs;}}
 function distancePairs(){{const pairs=[];for(let i=0;i<G.records.length;i++){{if(!pointOf(G.records[i]))continue;for(let j=i+1;j<G.records.length;j++){{const metres=distanceM(G.records[i],G.records[j]);if(Number.isFinite(metres)&&metres>0.01)pairs.push([G.records[i],G.records[j],metres]);}}}}return pairs;}}
 function nearestOptions(){{const valid=G.records.filter(pointOf),options=[];valid.forEach(reference=>{{const ranked=valid.filter(record=>record!==reference).map(record=>[distanceM(reference,record),record]).filter(item=>Number.isFinite(item[0])).sort((a,b)=>a[0]-b[0]);if(ranked.length>=4&&ranked[0][0]>0.01&&distinct(ranked[0][0],ranked[1][0]))options.push([reference,ranked.map(item=>item[1])]);}});return options;}}
@@ -273,6 +277,18 @@ function make(){{
     $('prompt').textContent=`${{T.nearest_q}} ${{ref.label}}?`;
     choices(shuffled(cands.map(r=>r.label)),nearest.label);
   }}
+  else if(mode==='direction'){{
+    const pairs=distancePairs();if(!pairs.length){{unavailable('Compass Quest is not available for this data.');return;}}
+    let [a,b,dist]=pick(pairs);
+    let deg=bearingDeg(a,b);
+    let [dirName,dirAngle]=compassDir(deg);
+    let ans=`${{dirName}} (${{dirAngle}}°)`;
+    current={{mode,answer:ans,detail:`${{ans}} (${{deg.toFixed(1)}}° true bearing)`}};
+    $('prompt').textContent=`In which compass direction is ${{b.label}} relative to ${{a.label}}?`;
+    let allOpts=DIRS.map(([n,ang])=>`${{n}} (${{ang}}°)`);
+    let decoys=sample(allOpts.filter(x=>x!==ans),3);
+    choices(shuffled([ans,...decoys]),ans);
+  }}
   else {{unavailable('This challenge is not available in the offline game.');return;}}
 
   startTimer(30);
@@ -332,12 +348,21 @@ function buildPlayCard(){{
   c.innerHTML=`<div class="badge" id="mode-badge"></div><h1 id="prompt"></h1><div id="arena"></div><div id="feedback"></div><button class="primary" id="next-btn" hidden>${{T.next}}</button>`;
 }}
 
+function rankTier(score,acc){{
+  if(score>=3500&&acc>=90)return['Grand Geographer & Master Cartographer','👑'];
+  if(score>=2500&&acc>=80)return['Senior Spatial Analyst','🌟'];
+  if(score>=1500&&acc>=65)return['Journeyman Surveyor','🧭'];
+  if(score>=800&&acc>=50)return['Cartographic Scout','🗺️'];
+  return['Apprentice Navigator','📍'];
+}}
+
 function finish(){{
   stopTimer();
   const acc=round>0?Math.round(correct_count/round*100):0;
+  const [tierName,tierIcon]=rankTier(score,acc);
   $('main-card').innerHTML=`<div class="result-card">
     <div class="result-score">${{score.toLocaleString()}}</div>
-    <div class="result-label">★ Final Score</div>
+    <div class="result-label">★ Final Score &bull; ${{tierIcon}} ${{tierName}}</div>
     <div class="result-grid">
       <div class="result-stat"><b>${{correct_count}}/${{round}}</b>Correct</div>
       <div class="result-stat"><b>${{acc}}%</b>Accuracy</div>

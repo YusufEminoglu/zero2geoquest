@@ -1,5 +1,16 @@
 # Changelog
 
+## [1.1.0] - 2026-08-21
+
+### Added
+- **Compass Quest Mode (9th Mode)**: Forward geodetic azimuth calculation with 8-point cardinal bearing options (N, NE, E, SE, S, SW, W, NW).
+- **Quest Pack Import/Export**: Portable JSON format (`.json`) with validation, metadata, and 3 bundled starter packs:
+  - *World Capitals & Metropolises*
+  - *European Geography & Landmarks*
+  - *Global Megacities*
+- **Geographic Intelligence Certificate Exporter**: Beautiful, standalone HTML achievement certificates with printable layouts and dynamic rank assessment titles based on score tiers.
+- **Enhanced HTML Web Game Exporter**: Added client-side Compass Quest support, dark theme integration, and live certificate badges.
+
 ## [1.0.6] - 2026-08-07
 
 - Added online user manual link (https://yusufeminoglu.github.io/zero2geoquest/) and GitHub repository star call-to-action.

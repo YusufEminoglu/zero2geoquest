@@ -3,11 +3,11 @@ name=02GeoQuest - Playable Map Studio
 qgisMinimumVersion=3.34
 qgisMaximumVersion=4.99
 description=Turn any vector layer into a polished geography game, classroom challenge or public-engagement quest.
-version=1.0.6
+version=1.1.0
 author=Yusuf Eminoglu
 email=yusuf.eminoglu@deu.edu.tr
 
-about=02GeoQuest transforms ordinary QGIS vector layers into playful, useful challenges. Play Map Hunt directly on the QGIS canvas, compare attribute values, estimate distances and recognise polygon silhouettes. Build mixed quests in seconds, keep a local leaderboard and export a privacy-friendly standalone HTML game that works entirely offline. No account, API key, server or pip dependency is required. Developed with feedback from educational workflows at Dokuz Eylul University, Department of City and Regional Planning. Online User Manual & Documentation: https://yusufeminoglu.github.io/zero2geoquest/ | If you find this plugin helpful, please consider starring the repository on GitHub (https://github.com/YusufEminoglu/zero2geoquest)!
+about=02GeoQuest transforms ordinary QGIS vector layers into playful, useful challenges. Play Map Hunt directly on the QGIS canvas, compare attribute values, estimate distances, recognise polygon silhouettes, and test geodetic bearings in Compass Quest. Build mixed quests, import/export Quest Packs, keep local scoreboards, generate printable Achievement Certificates, and export standalone privacy-friendly HTML games that run 100% offline. No account, API key, server or pip dependency is required. Developed with feedback from educational workflows at Dokuz Eylul University, Department of City and Regional Planning. Online User Manual & Documentation: https://yusufeminoglu.github.io/zero2geoquest/ | If you find this plugin helpful, please consider starring the repository on GitHub (https://github.com/YusufEminoglu/zero2geoquest)!
 
 tracker=https://github.com/YusufEminoglu/zero2geoquest/issues
 repository=https://github.com/YusufEminoglu/zero2geoquest
@@ -23,6 +23,11 @@ hasProcessingProvider=no
 license=GPL-3
 
 changelog=
+    1.1.0 - Major feature update:
+        Added: 9th game mode "Compass Quest" calculating forward geodetic azimuths and cardinal bearings.
+        Added: Quest Pack import/export system (.json) with 3 built-in starter packs (World Capitals, European Landmarks, Global Megacities).
+        Added: Geographic Intelligence Certificate HTML export with score badges and rank titles.
+        Added: Expanded standalone HTML export supporting Compass Quest, dark mode, and certificate summary.
     1.0.3 - Palette-aware adaptive theme.
         Changed: replace the hardcoded stylesheet and inline colour literals with palette-derived tokens so the dock stays readable under QGIS light, dark and high-contrast themes. The dock now listens for PaletteChange and re-applies the theme automatically.
     1.0.2 - Fix: ensure all eight game modes appear when their data requirements are met. Fix: ordering mode displays correct ranking answer. Fix: lives counter no longer goes negative. Fix: HTML export includes all eligible modes.

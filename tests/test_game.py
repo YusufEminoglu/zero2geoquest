@@ -15,7 +15,7 @@ def records():
 def test_all_question_modes_are_serializable_and_answered():
     factory = QuestionFactory(records(), seed=7)
     for mode in ("locate", "bigger", "distance", "silhouette", "attr_guess",
-                 "ordering", "nearest", "blind_zoom"):
+                 "ordering", "nearest", "blind_zoom", "direction"):
         question = factory.make(mode)
         assert question["mode"] == mode
         assert question["answer"] is not None
@@ -102,3 +102,25 @@ def test_value_duel_falls_back_to_area_when_value_is_null():
     ]
     question = QuestionFactory(two, seed=2).make("bigger")
     assert question["answer"] == "Large"
+
+
+def test_compass_direction_question_generates_correct_azimuth():
+    # Due North: lat increases
+    north_pair = [
+        {"fid": 1, "label": "South Point", "centroid": [0.0, 0.0]},
+        {"fid": 2, "label": "North Point", "centroid": [0.0, 10.0]},
+    ]
+    q_north = QuestionFactory(north_pair, seed=1).make("direction")
+    assert "North (0°)" in q_north["choices"]
+    assert q_north["answer"] == "North (0°)"
+    assert q_north["bearing_deg"] == 0.0
+
+    # Due East: lon increases
+    east_pair = [
+        {"fid": 1, "label": "West Point", "centroid": [0.0, 0.0]},
+        {"fid": 2, "label": "East Point", "centroid": [10.0, 0.0]},
+    ]
+    q_east = QuestionFactory(east_pair, seed=1).make("direction")
+    assert "East (90°)" in q_east["choices"]
+    assert q_east["answer"] == "East (90°)"
+    assert q_east["bearing_deg"] == 90.0

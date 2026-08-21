@@ -1,5 +1,10 @@
 # Changelog
 
+## [1.2.1] - 2026-08-21
+
+### Fixed
+- Removed a literal percent character from `metadata.txt`, allowing QGIS Hub and its interpolation-enabled metadata parser to validate the release package.
+
 ## [1.2.0] - 2026-08-21
 
 ### Added

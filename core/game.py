@@ -500,7 +500,7 @@ class GameSession:
     def __init__(self, modes: list[str], round_limit: int = 10, lives: int = 3,
                  seed: int | None = None, difficulty: str = "Medium",
                  joker_count: int = 3):
-        valid = [m for m in modes if m in MODES]
+        valid = list(dict.fromkeys(m for m in modes if m in MODES))
         if not valid:
             raise ValueError("At least one valid game mode is required.")
         self.modes = valid
@@ -518,6 +518,8 @@ class GameSession:
         self.started_at = time.monotonic()
         self.question_started_at = self.started_at
         self._awaiting_answer = False
+        self._mode_bag: list[str] = []
+        self._last_mode: str | None = None
 
     @property
     def finished(self) -> bool:
@@ -543,7 +545,14 @@ class GameSession:
             raise RuntimeError("Answer the current challenge before requesting another one.")
         self.question_started_at = time.monotonic()
         self._awaiting_answer = True
-        return self.rng.choice(self.modes)
+        if not self._mode_bag:
+            self._mode_bag = self.rng.shuffled(self.modes)
+            if (len(self._mode_bag) > 1 and self._last_mode is not None
+                    and self._mode_bag[0] == self._last_mode):
+                self._mode_bag[0], self._mode_bag[1] = self._mode_bag[1], self._mode_bag[0]
+        mode = self._mode_bag.pop(0)
+        self._last_mode = mode
+        return mode
 
     def answer(self, is_correct: bool, elapsed: float | None = None,
                closeness: float = 1.0) -> dict:
@@ -557,7 +566,7 @@ class GameSession:
         timed_out = seconds >= self.timer_seconds
         is_correct = bool(is_correct) and not timed_out
         closeness = _number(closeness)
-        closeness = max(0.25, closeness if closeness is not None else 0.25)
+        closeness = min(1.0, max(0.25, closeness if closeness is not None else 0.25))
         self._awaiting_answer = False
         self.rounds += 1
         gained = 0

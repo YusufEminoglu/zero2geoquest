@@ -2,8 +2,25 @@
 """Portable Quest Pack import, export and starter pack registry for 02GeoQuest."""
 from __future__ import annotations
 
+from contextlib import suppress
 import json
 from pathlib import Path
+
+from .game import DIFFICULTY, MODES, QuestionFactory
+
+
+PACK_VERSION = "1.2"
+MAX_PACK_BYTES = 5 * 1024 * 1024
+MAX_PACK_RECORDS = 5_000
+PORTABLE_MODES = tuple(mode for mode in MODES if mode != "locate")
+
+
+def _finite_number(value) -> bool:
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return False
+    return number == number and abs(number) != float("inf")
 
 
 def validate_pack(data: dict) -> tuple[bool, str]:
@@ -12,14 +29,50 @@ def validate_pack(data: dict) -> tuple[bool, str]:
         return False, "Quest Pack root must be a JSON object."
     if "title" not in data or not str(data["title"]).strip():
         return False, "Quest Pack must have a non-empty 'title'."
+    difficulty = data.get("difficulty", "Medium")
+    if difficulty not in DIFFICULTY:
+        return False, f"Unsupported difficulty: {difficulty!r}."
+    modes = data.get("modes")
+    if not isinstance(modes, list) or not modes:
+        return False, "Quest Pack must declare at least one game mode."
+    unknown_modes = [mode for mode in modes if mode not in MODES]
+    if unknown_modes:
+        return False, "Unknown game mode(s): " + ", ".join(map(str, unknown_modes))
+    if "locate" in modes:
+        return False, "Map Hunt cannot be stored in a portable Quest Pack because it needs a live QGIS layer."
+    if len(set(modes)) != len(modes):
+        return False, "Quest Pack modes must not contain duplicates."
     records = data.get("records")
     if not isinstance(records, list) or len(records) < 2:
         return False, "Quest Pack must contain at least 2 feature records."
+    if len(records) > MAX_PACK_RECORDS:
+        return False, f"Quest Pack exceeds the {MAX_PACK_RECORDS:,}-record safety limit."
+    seen_ids: set[str] = set()
     for idx, r in enumerate(records):
         if not isinstance(r, dict):
             return False, f"Record #{idx} is not a valid JSON object."
-        if "label" not in r and "display_label" not in r:
-            return False, f"Record #{idx} is missing a 'label'."
+        label = str(r.get("display_label") or r.get("label") or "").strip()
+        if not label:
+            return False, f"Record #{idx} has an empty 'label'."
+        record_id = str(r.get("fid", idx))
+        if record_id in seen_ids:
+            return False, f"Record #{idx} duplicates feature id {record_id!r}."
+        seen_ids.add(record_id)
+        for field in ("value", "area"):
+            if r.get(field) is not None and not _finite_number(r[field]):
+                return False, f"Record #{idx} has a non-finite '{field}'."
+        centroid = r.get("centroid")
+        if centroid is not None:
+            if (not isinstance(centroid, (list, tuple)) or len(centroid) < 2
+                    or not _finite_number(centroid[0]) or not _finite_number(centroid[1])):
+                return False, f"Record #{idx} has an invalid centroid."
+            lon, lat = float(centroid[0]), float(centroid[1])
+            if not (-180.0 <= lon <= 180.0 and -90.0 <= lat <= 90.0):
+                return False, f"Record #{idx} centroid is outside WGS84 bounds."
+    available = QuestionFactory(records).available_modes(modes)
+    unavailable = [mode for mode in modes if mode not in available]
+    if unavailable:
+        return False, "Mode(s) are not playable with these records: " + ", ".join(unavailable)
     return True, "Valid"
 
 
@@ -30,7 +83,9 @@ def export_pack(file_path: str | Path, title: str, description: str,
     clean_records = []
     for idx, r in enumerate(records, 1):
         clean_records.append({
-            "fid": r.get("fid", idx),
+            # Portable packs use their own stable ids; source-layer ids may
+            # collide when a quest mixes two QGIS layers.
+            "fid": idx,
             "label": str(r.get("display_label") or r.get("label") or f"Feature {idx}"),
             "value": r.get("value"),
             "area": r.get("area"),
@@ -40,18 +95,30 @@ def export_pack(file_path: str | Path, title: str, description: str,
         })
 
     pack = {
-        "version": "1.1.0",
+        "version": PACK_VERSION,
         "title": title.strip() or "Custom Quest Pack",
         "description": description.strip(),
         "difficulty": difficulty,
-        "modes": modes or ["bigger", "distance", "direction", "silhouette", "nearest"],
+        "modes": list(dict.fromkeys(mode for mode in (
+            modes or ["bigger", "distance", "direction", "silhouette", "nearest"]
+        ) if mode in PORTABLE_MODES)),
         "records": clean_records,
     }
 
+    valid, message = validate_pack(pack)
+    if not valid:
+        raise ValueError(f"Cannot export Quest Pack: {message}")
+
     path = Path(file_path)
     path.parent.mkdir(parents=True, exist_ok=True)
-    with open(path, "w", encoding="utf-8") as f:
-        json.dump(pack, f, ensure_ascii=False, indent=2)
+    temporary = path.with_name(f".{path.name}.tmp")
+    try:
+        temporary.write_text(
+            json.dumps(pack, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+        temporary.replace(path)
+    finally:
+        with suppress(FileNotFoundError):
+            temporary.unlink()
 
 
 def import_pack(file_path: str | Path) -> dict:
@@ -59,8 +126,12 @@ def import_pack(file_path: str | Path) -> dict:
     path = Path(file_path)
     if not path.is_file():
         raise FileNotFoundError(f"Quest pack file not found: {path}")
-    with open(path, "r", encoding="utf-8") as f:
-        data = json.load(f)
+    if path.stat().st_size > MAX_PACK_BYTES:
+        raise ValueError(f"Quest pack exceeds the {MAX_PACK_BYTES // (1024 * 1024)} MB safety limit.")
+    try:
+        data = json.loads(path.read_text(encoding="utf-8-sig"))
+    except json.JSONDecodeError as exc:
+        raise ValueError(f"Quest pack contains invalid JSON at line {exc.lineno}.") from exc
     valid, msg = validate_pack(data)
     if not valid:
         raise ValueError(f"Invalid quest pack '{path.name}': {msg}")

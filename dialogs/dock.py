@@ -26,7 +26,7 @@ from ..core.exporter import HTML_MODES, write_html
 from ..core.game import DIFFICULTY, MODES, GameSession, QuestionFactory
 from ..core.layer_data import feature_at_point, merge_layers, records_from_layer
 from ..core.profiles import AVATARS, ProfileManager
-from ..core.quest_pack import STARTER_PACKS, export_pack, import_pack
+from ..core.quest_pack import STARTER_PACKS, export_pack, import_pack, validate_pack
 from .theme import apply_adaptive_theme, dock_color_tokens
 
 PLUGIN_TITLE = "02GeoQuest — Playable Map Studio"
@@ -725,7 +725,15 @@ class GeoQuestDockWidget(QDockWidget):
     def start_game(self) -> None:
         if not self._prepare_records():
             return
-        modes = self._active_modes
+        self._launch_game()
+
+    def _launch_game(self) -> None:
+        """Start a session from the records and modes already prepared."""
+        modes = list(self._active_modes)
+        if self.factory is None or not modes:
+            self.builder_status.setText("No playable challenge modes are available.")
+            self._show_page(1)
+            return
         self.session = GameSession(
             modes, self.round_count.value(), self.lives_count.value(),
             seed=time.time_ns(), difficulty=self._difficulty,
@@ -764,17 +772,17 @@ class GeoQuestDockWidget(QDockWidget):
             return
         self._clear_answers()
         mode = self.session.next_mode()
-        for _ in range(len(self.session.modes)):
+        candidate_modes = [mode] + [item for item in self.session.modes if item != mode]
+        last_error = ""
+        for candidate in candidate_modes:
             try:
-                self.question = self.factory.make(mode, self._difficulty)
+                self.question = self.factory.make(candidate, self._difficulty)
                 break
-            except ValueError:
-                other_modes = [m for m in self.session.modes if m != mode]
-                if not other_modes:
-                    self._finish_game()
-                    return
-                mode = self.session.rng.choice(other_modes)
+            except ValueError as exc:
+                last_error = str(exc)
         else:
+            self.builder_status.setText(
+                "Quest stopped because no challenge could be generated. " + last_error)
             self._finish_game()
             return
 
@@ -1413,19 +1421,28 @@ class GeoQuestDockWidget(QDockWidget):
         self._apply_pack_data(pack_data)
 
     def _apply_pack_data(self, pack_data: dict) -> None:
+        valid, message = validate_pack(pack_data)
+        if not valid:
+            raise ValueError(f"Invalid Quest Pack: {message}")
         title = str(pack_data.get("title", "Custom Quest"))
         self.quest_title.setCurrentText(title)
         self.records = list(pack_data.get("records", []))
-        self.factory = QuestionFactory(self.records)
+        self.factory = QuestionFactory(self.records, seed=time.time_ns())
         diff = str(pack_data.get("difficulty", "Medium"))
         if diff in self.diff_buttons:
             self._set_difficulty(diff)
-        modes = pack_data.get("modes", [])
+        modes = list(pack_data.get("modes", []))
         for mode, check in self.mode_checks.items():
-            check.setChecked(mode in modes if modes else True)
+            check.setChecked(mode in modes)
+        self._active_modes = self.factory.available_modes(modes)
+        self.export_summary.setText(
+            f"{title} · {len(self.records)} features · "
+            f"{self.round_count.value()} rounds · {self._difficulty}")
         self.iface.messageBar().pushSuccess(
             PLUGIN_TITLE, f"Loaded Quest Pack '{title}' ({len(self.records)} features)")
-        self.start_game()
+        # Do not call start_game(): it prepares the currently selected QGIS
+        # layer and would overwrite the imported pack records.
+        self._launch_game()
 
     # ── Cleanup ───────────────────────────────────────────────────────────────
 

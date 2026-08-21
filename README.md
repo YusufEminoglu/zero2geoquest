@@ -27,6 +27,7 @@ Turn any QGIS vector dataset into an interactive geography game, teaching activi
 ## 📦 Quest Packs & 📜 Certificates
 
 - **Quest Pack Import/Export:** Save custom quests as portable JSON (`.json`) files with validation, or load the 3 built-in starter packs (*World Capitals*, *European Landmarks*, *Global Megacities*).
+- **Reliable Portable Packs:** Imported packs play their packaged records directly, use atomic saves, validate geographic/numeric data, and reject modes that require a live QGIS layer.
 - **Geographic Intelligence Certificates:** Generate printable, responsive standalone HTML achievement certificates with dynamic rank assessment badges based on score tiers.
 
 ---
@@ -37,6 +38,7 @@ Turn any QGIS vector dataset into an interactive geography game, teaching activi
 - **Joker System:** Use up to 3 jokers per quest (Eliminate options, Value Range Hint, or Map Region Hint).
 - **Multi-Layer Mixing:** Combine two vector layers into a single mixed quest.
 - **Streak & Speed Bonuses:** Build multiplier streaks (🔥 ×3+) for high score bonuses.
+- **Balanced Mode Rotation:** Every selected mode appears once before the rotation repeats, avoiding back-to-back duplicate challenge types.
 - **Visual Feedback:** Live canvas highlighting, pulse effects, and interactive feedback.
 
 ---

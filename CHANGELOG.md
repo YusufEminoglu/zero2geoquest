@@ -1,5 +1,21 @@
 # Changelog
 
+## [1.2.0] - 2026-08-21
+
+### Added
+- Balanced shuffle-bag question rotation: every selected game mode is presented before a mode repeats, without consecutive repeats at cycle boundaries.
+- Quest Pack schema validation for supported modes, difficulty, playability, finite numeric values, WGS84 coordinate bounds, duplicate feature ids, a 5 MB file limit, and a 5,000-record limit.
+- Collision-free portable feature ids when exporting mixed QGIS layers.
+
+### Changed
+- Quest Pack exports now use schema version 1.2 and atomic file replacement, preventing a failed write from leaving a truncated pack.
+- Challenge generation fallback now evaluates every selected mode once and surfaces a useful reason if none can be generated.
+
+### Fixed
+- Imported and built-in Quest Packs now start directly from their packaged records; starting a pack no longer reloads and substitutes the currently selected QGIS layer.
+- Map Hunt is rejected in portable packs because it requires a live QGIS layer identity.
+- Score closeness multipliers are clamped to the documented range, preventing malformed values from inflating a result.
+
 ## [1.1.1] - 2026-08-21
 
 ### Added

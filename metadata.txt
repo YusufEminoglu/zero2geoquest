@@ -3,7 +3,7 @@ name=02GeoQuest - Playable Map Studio
 qgisMinimumVersion=3.34
 qgisMaximumVersion=4.99
 description=Turn any vector layer into a polished geography game, classroom challenge or public-engagement quest.
-version=1.1.1
+version=1.2.0
 author=Yusuf Eminoglu
 email=yusuf.eminoglu@deu.edu.tr
 
@@ -23,6 +23,13 @@ hasProcessingProvider=no
 license=GPL-3
 
 changelog=
+    1.2.0 - Reliable Quest Packs & Balanced Play:
+        Fixed: Imported and built-in Quest Packs now launch from their own records instead of being overwritten by the selected QGIS layer.
+        Added: Shuffle-bag mode rotation presents every selected mode before repeating one and avoids consecutive repeats.
+        Added: Strict portable-pack validation for modes, difficulty, WGS84 coordinates, finite values, duplicate ids, playability, file size and record count.
+        Added: Atomic Quest Pack saves and collision-free portable ids for mixed-layer exports.
+        Fixed: Score closeness multipliers are bounded to prevent malformed inputs from inflating scores.
+        Improved: Challenge fallback tries each selected mode exactly once and reports a useful failure reason.
     1.1.1 - Ranking Mode Usability & Reordering Controls:
         Added: Move Up (⬆️) and Move Down (⬇️) buttons for reliable, accessible ranking reordering alongside drag-and-drop.
         Added: Dynamic rank badge indicators (🥇 1st Highest, 🥈 2nd, 🥉 3rd, 🔻 4th Lowest) updating live as items are sorted.

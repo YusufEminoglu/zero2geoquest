@@ -228,6 +228,32 @@ QListWidget::item {
     padding: 7px;
     border-bottom: 1px solid %(border)s;
 }
+QListWidget#orderingList {
+    background: %(surface)s;
+    color: %(text)s;
+    border: 1.5px solid %(border)s;
+    border-radius: 10px;
+    padding: 4px;
+    font-size: 10pt;
+}
+QListWidget#orderingList::item {
+    background: %(card)s;
+    color: %(text)s;
+    border: 1px solid %(border)s;
+    border-radius: 8px;
+    padding: 8px 10px;
+    margin: 3px 2px;
+    font-weight: 600;
+}
+QListWidget#orderingList::item:selected {
+    background: %(accent_soft)s;
+    color: %(accent)s;
+    border: 2px solid %(accent)s;
+    font-weight: 700;
+}
+QListWidget#orderingList::item:hover {
+    border-color: %(accent)s;
+}
 QLabel#privacyLabel {
     color: %(privacy_text)s;
     background: %(privacy_bg)s;

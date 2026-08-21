@@ -253,19 +253,40 @@ class GeoQuestDockWidget(QDockWidget):
         self.answer_layout.setContentsMargins(0, 0, 0, 0)
         self.input_stack.addWidget(choice_page)
 
-        # Page 1: Ordering (drag-and-drop list)
+        # Page 1: Ordering (drag-and-drop & button reordering list)
         ordering_page = QWidget()
         ordering_v = QVBoxLayout(ordering_page)
         ordering_v.setContentsMargins(0, 0, 0, 0)
-        hint = QLabel("Drag items to rank from highest ↓ to lowest:")
-        hint.setStyleSheet("color:#6b7280;font-size:9pt")
-        ordering_v.addWidget(hint)
+        ordering_v.setSpacing(6)
+        self.ordering_hint = QLabel("💡 Rank items from HIGHEST (top) ↓ to LOWEST (bottom):")
+        self.ordering_hint.setStyleSheet("color:#7c3aed;font-weight:700;font-size:9pt;")
+        self.ordering_hint.setWordWrap(True)
+        ordering_v.addWidget(self.ordering_hint)
+
         self.ordering_list = QListWidget()
+        self.ordering_list.setObjectName("orderingList")
+        self.ordering_list.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
         self.ordering_list.setDragDropMode(QAbstractItemView.DragDropMode.InternalMove)
         self.ordering_list.setDefaultDropAction(Qt.DropAction.MoveAction)
-        self.ordering_list.setMinimumHeight(120)
+        self.ordering_list.setAcceptDrops(True)
+        self.ordering_list.setDragEnabled(True)
+        self.ordering_list.setDropIndicatorShown(True)
+        self.ordering_list.setMinimumHeight(150)
+        self.ordering_list.model().rowsMoved.connect(self._on_ordering_rows_moved)
         ordering_v.addWidget(self.ordering_list, 1)
-        self.ordering_submit = QPushButton("Submit ranking")
+
+        move_btn_row = QHBoxLayout()
+        self.order_up_btn = QPushButton("⬆️ Move Up")
+        self.order_up_btn.setToolTip("Move selected item higher in rank (towards 1st)")
+        self.order_up_btn.clicked.connect(self._move_ordering_item_up)
+        self.order_down_btn = QPushButton("⬇️ Move Down")
+        self.order_down_btn.setToolTip("Move selected item lower in rank (towards lowest)")
+        self.order_down_btn.clicked.connect(self._move_ordering_item_down)
+        move_btn_row.addWidget(self.order_up_btn)
+        move_btn_row.addWidget(self.order_down_btn)
+        ordering_v.addLayout(move_btn_row)
+
+        self.ordering_submit = QPushButton("✓ Submit ranking")
         self.ordering_submit.setProperty("class", "primary")
         self.ordering_submit.clicked.connect(self._submit_ordering)
         ordering_v.addWidget(self.ordering_submit)
@@ -793,8 +814,14 @@ class GeoQuestDockWidget(QDockWidget):
         elif mode == "ordering":
             self.input_stack.setCurrentIndex(1)
             self.ordering_list.clear()
-            for item_data in self.question["items"]:
-                self.ordering_list.addItem(item_data["label"])
+            for item_data in self.question.get("items", []):
+                label = item_data.get("label", "")
+                item = QListWidgetItem()
+                item.setData(Qt.ItemDataRole.UserRole, label)
+                self.ordering_list.addItem(item)
+            self._refresh_ordering_display()
+            if self.ordering_list.count() > 0:
+                self.ordering_list.setCurrentRow(0)
 
     def _show_choices(self, choices: list) -> None:
         self.input_stack.setCurrentIndex(0)
@@ -910,11 +937,72 @@ class GeoQuestDockWidget(QDockWidget):
         self._score(error <= tol, f"{truth:,.2f}",
                     closeness=max(0.25, 1.0 - error))
 
+    def _on_ordering_rows_moved(self, _parent=None, _start=0, _end=0, _dest=None, _row=0) -> None:
+        self._refresh_ordering_display()
+
+    def _refresh_ordering_display(self) -> None:
+        rank_badges = ["🥇 1st (Highest)", "🥈 2nd", "🥉 3rd", "🔻 4th (Lowest)", "5th", "6th", "7th"]
+        count = self.ordering_list.count()
+        for i in range(count):
+            item = self.ordering_list.item(i)
+            raw_label = item.data(Qt.ItemDataRole.UserRole)
+            if not raw_label:
+                raw_label = item.text()
+                for prefix in ("🥇 ", "🥈 ", "🥉 ", "🔻 "):
+                    if raw_label.startswith(prefix):
+                        if ":  " in raw_label:
+                            raw_label = raw_label.split(":  ", 1)[1]
+                        break
+                item.setData(Qt.ItemDataRole.UserRole, raw_label)
+
+            badge = rank_badges[i] if i < len(rank_badges) else f"#{i+1}"
+            if count == 3 and i == 2:
+                badge = "🔻 3rd (Lowest)"
+            item.setText(f"{badge}:  {raw_label}")
+
+    def _move_ordering_item_up(self) -> None:
+        row = self.ordering_list.currentRow()
+        if row > 0:
+            item = self.ordering_list.takeItem(row)
+            self.ordering_list.insertItem(row - 1, item)
+            self.ordering_list.setCurrentRow(row - 1)
+            self._refresh_ordering_display()
+
+    def _move_ordering_item_down(self) -> None:
+        row = self.ordering_list.currentRow()
+        if 0 <= row < self.ordering_list.count() - 1:
+            item = self.ordering_list.takeItem(row)
+            self.ordering_list.insertItem(row + 1, item)
+            self.ordering_list.setCurrentRow(row + 1)
+            self._refresh_ordering_display()
+
     def _submit_ordering(self) -> None:
-        submitted = [self.ordering_list.item(i).text()
-                     for i in range(self.ordering_list.count())]
-        correct = list(self.question["answer"])
-        self._score(submitted == correct, " > ".join(correct))
+        if not self.question or self.session is None or not self.session.awaiting_answer:
+            return
+        submitted = []
+        for i in range(self.ordering_list.count()):
+            item = self.ordering_list.item(i)
+            label = item.data(Qt.ItemDataRole.UserRole)
+            if not label:
+                txt = item.text()
+                if ":  " in txt:
+                    label = txt.split(":  ", 1)[1]
+                else:
+                    label = txt
+            submitted.append(str(label).strip())
+
+        correct = [str(x).strip() for x in self.question.get("answer", [])]
+        items_dict = {str(it["label"]).strip(): it.get("value") for it in self.question.get("items", [])}
+
+        detail_parts = []
+        for rank_idx, c_label in enumerate(correct, 1):
+            val = items_dict.get(c_label)
+            val_str = f" ({val:,.2f})" if val is not None else ""
+            detail_parts.append(f"{rank_idx}. {c_label}{val_str}")
+        detail_msg = "  >  ".join(detail_parts)
+
+        is_correct = (submitted == correct)
+        self._score(is_correct, detail_msg)
 
     def handle_map_pick(self, point) -> None:
         if not self.question or self.question.get("mode") != "locate" or self.session is None:

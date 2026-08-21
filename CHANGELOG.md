@@ -1,5 +1,14 @@
 # Changelog
 
+## [1.1.1] - 2026-08-21
+
+### Added
+- **Ranking Reordering Controls**: Added Move Up (⬆️) and Move Down (⬇️) buttons for accessible list sorting.
+- **Dynamic Rank Badge Indicators**: Added live position medals and indicators (🥇 1st Highest, 🥈 2nd, 🥉 3rd, 🔻 4th Lowest) updating dynamically during drag or button movement.
+
+### Fixed
+- **Ranking Submission & Data Mapping**: Stored raw feature labels safely in Qt item UserRole data, preventing string formatting mismatch or empty submissions.
+
 ## [1.1.0] - 2026-08-21
 
 ### Added

@@ -3,7 +3,7 @@ name=02GeoQuest - Playable Map Studio
 qgisMinimumVersion=3.34
 qgisMaximumVersion=4.99
 description=Turn any vector layer into a polished geography game, classroom challenge or public-engagement quest.
-version=1.1.0
+version=1.1.1
 author=Yusuf Eminoglu
 email=yusuf.eminoglu@deu.edu.tr
 
@@ -23,6 +23,10 @@ hasProcessingProvider=no
 license=GPL-3
 
 changelog=
+    1.1.1 - Ranking Mode Usability & Reordering Controls:
+        Added: Move Up (⬆️) and Move Down (⬇️) buttons for reliable, accessible ranking reordering alongside drag-and-drop.
+        Added: Dynamic rank badge indicators (🥇 1st Highest, 🥈 2nd, 🥉 3rd, 🔻 4th Lowest) updating live as items are sorted.
+        Fixed: Enhanced submit ranking handler with clean UserRole data mapping, preventing text truncation or missing items.
     1.1.0 - Major feature update:
         Added: 9th game mode "Compass Quest" calculating forward geodetic azimuths and cardinal bearings.
         Added: Quest Pack import/export system (.json) with 3 built-in starter packs (World Capitals, European Landmarks, Global Megacities).

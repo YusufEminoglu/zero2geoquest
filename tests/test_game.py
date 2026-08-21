@@ -53,6 +53,32 @@ def test_session_rejects_repeat_answers_and_enforces_timeout():
         session.answer(True, elapsed=1)
 
 
+def test_session_rotates_modes_before_repeating_and_deduplicates_input():
+    session = GameSession(
+        ["locate", "bigger", "distance", "locate"],
+        round_limit=9, lives=9, seed=17)
+    sequence = []
+    for _ in range(9):
+        sequence.append(session.next_mode())
+        session.answer(True, elapsed=1)
+
+    expected = {"locate", "bigger", "distance"}
+    assert set(session.modes) == expected
+    assert all(set(sequence[index:index + 3]) == expected for index in range(0, 9, 3))
+    assert all(first != second for first, second in zip(sequence, sequence[1:]))
+
+
+def test_score_closeness_is_bounded_to_prevent_inflated_points():
+    baseline = GameSession(["locate"], round_limit=1, seed=3)
+    baseline.next_mode()
+    normal = baseline.answer(True, elapsed=1, closeness=1.0)
+
+    oversized = GameSession(["locate"], round_limit=1, seed=3)
+    oversized.next_mode()
+    bounded = oversized.answer(True, elapsed=1, closeness=99.0)
+    assert bounded["gained"] == normal["gained"]
+
+
 def test_equal_or_invalid_data_is_filtered_before_question_generation():
     tied = [
         {"fid": 1, "label": "A", "value": 5, "area": 5, "centroid": [1, 1]},

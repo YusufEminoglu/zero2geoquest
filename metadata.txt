@@ -3,15 +3,15 @@ name=02GeoQuest - Playable Map Studio
 qgisMinimumVersion=3.34
 qgisMaximumVersion=4.99
 description=Turn any vector layer into a polished geography game, classroom challenge or public-engagement quest.
-version=1.2.1
+version=1.2.2
 author=Yusuf Eminoglu
 email=yusuf.eminoglu@deu.edu.tr
 
-about=02GeoQuest transforms ordinary QGIS vector layers into playful, useful challenges. Play Map Hunt directly on the QGIS canvas, compare attribute values, estimate distances, recognise polygon silhouettes, and test geodetic bearings in Compass Quest. Build mixed quests, import/export Quest Packs, keep local scoreboards, generate printable Achievement Certificates, and export standalone privacy-friendly HTML games that run fully offline. No account, API key, server or pip dependency is required. Developed with feedback from educational workflows at Dokuz Eylul University, Department of City and Regional Planning. Online User Manual & Documentation: https://yusufeminoglu.github.io/zero2geoquest/ | If you find this plugin helpful, please consider starring the repository on GitHub (https://github.com/YusufEminoglu/zero2geoquest)!
+about=02GeoQuest transforms ordinary QGIS vector layers into playful, useful challenges. Play Map Hunt directly on the QGIS canvas, compare attribute values, estimate distances, recognise polygon silhouettes, and test geodetic bearings in Compass Quest. Build mixed quests, import/export Quest Packs, keep local scoreboards, generate printable Achievement Certificates, and export standalone privacy-friendly HTML games that run fully offline. No account, API key, server or pip dependency is required. Developed with feedback from educational workflows at Dokuz Eylul University, Department of City and Regional Planning. Online User Manual & Documentation: https://geophilo.pages.dev/zero2geoquest/ | If you find this plugin helpful, please consider starring the repository on GitLab (https://gitlab.com/geospacephilo/zero2geoquest)!
 
-tracker=https://github.com/YusufEminoglu/zero2geoquest/issues
-repository=https://github.com/YusufEminoglu/zero2geoquest
-homepage=https://yusufeminoglu.github.io/zero2geoquest/
+tracker=https://gitlab.com/geospacephilo/zero2geoquest/-/issues
+repository=https://gitlab.com/geospacephilo/zero2geoquest
+homepage=https://geophilo.pages.dev/zero2geoquest/
 
 category=Vector
 tags=game,education,quiz,geography,engagement,classroom,offline,html,planx

@@ -3,7 +3,7 @@ name=02GeoQuest - Playable Map Studio
 qgisMinimumVersion=3.34
 qgisMaximumVersion=4.99
 description=Turn any vector layer into a polished geography game, classroom challenge or public-engagement quest.
-version=1.2.2
+version=1.2.3
 author=Yusuf Eminoglu
 email=yusuf.eminoglu@deu.edu.tr
 
@@ -23,6 +23,7 @@ hasProcessingProvider=no
 license=GPL-3
 
 changelog=
+    1.2.3 - Redesign plugin icon to high-end 3D tactile brand design with circular teal pedestal, zero margin, and refreshed documentation links.
     1.2.1 - Hub Metadata Compatibility:
         Fixed: Removed a literal percent character from plugin metadata so QGIS Hub can parse and validate the release package.
     1.2.0 - Reliable Quest Packs & Balanced Play:

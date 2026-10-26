@@ -13,8 +13,8 @@ Turn any QGIS vector dataset into an interactive geography game, teaching activi
 ## 🎮 What You Can Play (9 Modes)
 
 - 📍 **Map Hunt:** Find requested features directly on the live QGIS map canvas.
-- ⚖️ **Value Duel:** Compare two features to determine which has the larger numeric value or area.
-- 📏 **Distance Guess:** Estimate the geographic distance between two places.
+- ⚖️ **Value Duel:** Compare two features by your numeric field (the prompt names it) or, without one, by area.
+- 📏 **Distance Guess:** Estimate the geographic distance between two places — in metres for city-scale quests, kilometres otherwise.
 - 🧩 **Know the Shape:** Identify a feature from its antialiased polygon silhouette.
 - 🎯 **Attribute Guess:** Estimate a numeric attribute using a slider control.
 - 📊 **Ranking:** Order 3–4 features from highest to lowest value via drag-and-drop.
@@ -26,7 +26,7 @@ Turn any QGIS vector dataset into an interactive geography game, teaching activi
 
 ## 📦 Quest Packs & 📜 Certificates
 
-- **Quest Pack Import/Export:** Save custom quests as portable JSON (`.json`) files with validation, or load the 3 built-in starter packs (*World Capitals*, *European Landmarks*, *Global Megacities*).
+- **Quest Pack Import/Export:** Save custom quests as portable JSON (`.json`) files with validation, or load the 3 built-in starter packs (*World Capitals*, *European Landmarks*, *Global Megacities*). Starter-pack populations all come from UN DESA *World Urbanization Prospects 2018* (urban agglomeration, 2018).
 - **Reliable Portable Packs:** Imported packs play their packaged records directly, use atomic saves, validate geographic/numeric data, and reject modes that require a live QGIS layer.
 - **Geographic Intelligence Certificates:** Generate printable, responsive standalone HTML achievement certificates with dynamic rank assessment badges based on score tiers.
 
@@ -35,11 +35,13 @@ Turn any QGIS vector dataset into an interactive geography game, teaching activi
 ## ⚡ Game Features & Rules
 
 - **Difficulty Levels:** Easy (60s timer, 3 choices), Medium (30s timer, 4 choices), and Hard (15s timer, 6 choices).
-- **Joker System:** Use up to 3 jokers per quest (Eliminate options, Value Range Hint, or Map Region Hint).
+- **Joker System:** Eliminate wrong options, narrow the input to a window that always contains the answer, or zoom to a hint area.
 - **Multi-Layer Mixing:** Combine two vector layers into a single mixed quest.
 - **Streak & Speed Bonuses:** Build multiplier streaks (🔥 ×3+) for high score bonuses.
 - **Balanced Mode Rotation:** Every selected mode appears once before the rotation repeats, avoiding back-to-back duplicate challenge types.
-- **Visual Feedback:** Live canvas highlighting, pulse effects, and interactive feedback.
+- **Keyboard Play:** Keys 1–9 pick an answer and Enter submits or continues, in QGIS and in the HTML game.
+- **Fair Questions:** Answer-independent input ranges, no compass pairs on a sector edge, rankings that never start solved.
+- **Visual Feedback:** Live canvas highlighting and immediate answer feedback.
 
 ---
 
@@ -55,7 +57,8 @@ Turn any QGIS vector dataset into an interactive geography game, teaching activi
 
 Export any quest into a single, self-contained HTML file:
 - **Offline & Private:** Zero external network calls, zero CDNs, no tracking, works completely offline.
-- **Responsive & Dark Mode:** Built-in dark mode toggle, smooth animations, and progress indicator dots.
+- **Same Rules:** The quest's difficulty, lives and scoring formula carry over; every load asks new questions.
+- **Responsive & Dark Mode:** Follows the system theme with a toggle, keyboard play, progress dots, and a personal best per device.
 
 ---
 

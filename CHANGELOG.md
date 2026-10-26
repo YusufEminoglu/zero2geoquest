@@ -1,5 +1,32 @@
 # Changelog
 
+## [1.3.0] - 2026-10-26
+
+### Fixed
+- **Ranking and Attribute Guess could be answered only once per session.** Scoring disabled their submit buttons and nothing re-enabled them, so every later round of those modes was lost on the timer.
+- **Compass Quest showed no answer buttons in QGIS**, so every Compass round was lost on the timer; the Eliminate joker also skipped it.
+- **Distance Guess leaked its answer.** The input started at 0.75 × the true distance (and topped out at 3×), so pressing OK without typing scored as correct on Easy and Medium. The range now comes from the widest pair in the quest and starts at 0; city-scale quests (widest pair under 20 km) are asked in metres, where 1-decimal kilometres could not express the answer. The offline game had the same leak (slider at 1.25 × the answer).
+- **The Value Hint joker could hide the answer**: it halved the range around its midpoint. The half-width window is now placed at a random offset that always contains the answer.
+- **Eliminate was spent for nothing on Value Duel**, which only has two options; it is now offered only when two wrong options exist.
+- **Play again after a Quest Pack** reloaded the selected QGIS layer instead of the pack (the 1.2.0 fix covered only the first launch). Replay and HTML/pack export now keep the pack until a layer is chosen.
+- **Value Duel mixed units**: with values on only some features it compared a numeric field against square-metre area. It now uses the numeric field whenever it holds two different values, area otherwise, and the prompt says which (“greater population”, “larger area”).
+- **Blind Zoom and Map Hint on point layers** zoomed to a zero-size extent; both now keep at least ~300 m of context, and Map Hint no longer centres the window exactly on the target.
+- **Map Hunt with overlapping polygons** returned the first containing feature, so a correct click inside the target could score as wrong. Every feature under the click now counts, found through a spatial filter instead of a full layer scan per click.
+- **Starter pack populations mixed definitions** — Paris used its 2.16 M city-proper figure while Tokyo used 37.4 M for the agglomeration, so Paris lost duels it should win. All three packs now use UN DESA *World Urbanization Prospects 2018* (urban agglomeration, 2018); *Global Megacities* is now that source’s ten largest agglomerations, and its description no longer calls population “density”.
+- **Quest Packs without integer ids** collapsed every record to one identity, disabling Nearest Neighbour and Blind Zoom decoys; records now get their own internal identity.
+- **Silhouettes from geographic layers** were stretched east–west by 1/cos(latitude); the offline game stretched every silhouette to fill its frame.
+- **The offline HTML game used a fixed seed**, so each load and each replay asked the same questions. It is now seeded from the browser’s random source, and both engines draw from the generator’s high bits (the low bits of a power-of-two LCG alternate).
+- **Attribute Guess tolerance** used `max(1, range)`, which made it far too lenient on ratio data (0–1): ±0.25 on a 0.4-wide range.
+- Adding a class profile reset the active profile to none; the certificate now uses the active player’s own best session.
+- Large layers were cut to their first 500 table rows; they are now sampled evenly across the whole layer, and the Builder says so.
+
+### Added
+- Offline HTML: the quest’s difficulty (timer, choices, tolerance), lives and the plugin’s scoring formula; balanced mode rotation; keyboard play (1–9, Enter); system dark mode; best streak, difficulty and a per-device personal best on the results screen; in-place replay. Only label, value, area, centroid and outline are written to the file.
+- Dock: keys 1–9 pick an answer and Enter submits or continues; a **Pick on map** button re-arms Map Hunt after panning; prompts name the chosen field (or its alias).
+- Compass Quest skips pairs within 5° of a sector boundary, where neighbouring answers are indistinguishable; Ranking never starts already solved; Nearest Neighbour draws closer decoys on Medium and Hard.
+- Quest Packs carry an optional `value_label` and `source`.
+- Tests: 21 regression tests for these fixes, and a headless QGIS test (`tests/qgis_dock_e2e.py`, both runtimes) that plays a 36-round quest through the dock’s own widgets in all nine modes.
+
 ## [1.2.3] - 2026-09-16
 
 - Redesign plugin icon to high-end 3D tactile brand design with circular teal pedestal, zero margin, and refreshed documentation links.

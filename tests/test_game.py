@@ -7,6 +7,7 @@ def records():
     return [
         {"fid": i, "label": f"Place {i}", "value": i * 10, "area": i * 100,
          "centroid": [i * 0.01, i * 0.02],
+         "bbox_wgs84": [i * 0.01 - 0.001, i * 0.02 - 0.001, i * 0.01 + 0.001, i * 0.02 + 0.001],
          "outline": [[0, 0], [i + 1, 0], [i + 1, i + 1], [0, 0]]}
         for i in range(1, 8)
     ]

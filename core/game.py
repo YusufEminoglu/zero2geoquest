@@ -24,9 +24,25 @@ DIFFICULTY: dict[str, dict] = {
     "Hard":   {"timer": 15, "choices": 6, "tolerance": 0.10},
 }
 
+# Compass Quest skips pairs whose bearing lies this close to a sector edge:
+# 22.4° and 22.6° are different answers, and no player can tell them apart.
+BEARING_MARGIN_DEG = 5.0
+
+# Distance Guess skips pairs shorter than this share of the widest pair, so a
+# continental quest never asks for a 30 m gap on a 3,000 km input range.
+MIN_DISTANCE_SHARE = 0.01
+
+# Below this widest-pair span distances are asked in metres, above it in km.
+METRE_UNIT_LIMIT_M = 20_000.0
+
 
 def display_records(records: list[dict]) -> list[dict]:
-    """Copy records and give duplicate feature labels unambiguous display names."""
+    """Copy records and give duplicate feature labels unambiguous display names.
+
+    Every copy also receives a private ``_uid`` (its position), which is the
+    identity the factory uses: Quest Pack ids may be missing, repeated across
+    layers or not integers at all.
+    """
     copied = [dict(record) for record in records]
     counts: dict[str, int] = {}
     for record in copied:
@@ -45,13 +61,14 @@ def display_records(records: list[dict]) -> list[dict]:
             candidate = f"{label} [{index}-{suffix}]"
             suffix += 1
         record["display_label"] = candidate
+        record["_uid"] = index
         used.add(candidate)
     return copied
 
 
-def _record_key(record: dict) -> tuple[str, str]:
-    """Return a stable identity that remains unique across mixed layers."""
-    return str(record.get("layer_id", "")), int(record.get("fid", -1))
+def _record_key(record: dict):
+    """Return the identity assigned by :func:`display_records`."""
+    return record.get("_uid", id(record))
 
 
 def _number(value) -> float | None:
@@ -62,11 +79,17 @@ def _number(value) -> float | None:
     return number if math.isfinite(number) else None
 
 
-def _comparison_value(record: dict) -> float | None:
-    value = _number(record.get("value"))
-    return value if value is not None else _number(record.get("area"))
+def comparison_metric(records: list[dict]) -> str:
+    """Return the field Value Duel compares: ``"value"`` or ``"area"``.
 
-# ── LCG (non-cryptographic) ──────────────────────────────────────────────────
+    The numeric field wins whenever it carries two different values; area is
+    only the fallback for quests without one. Mixing them per record would
+    compare a population with a square-metre area.
+    """
+    values = {_number(record.get("value")) for record in records}
+    values.discard(None)
+    return "value" if len(values) >= 2 else "area"
+
 
 def _centroid(record: dict) -> tuple[float, float] | None:
     """Return a finite WGS84 centroid, or ``None`` for unusable records."""
@@ -85,32 +108,73 @@ def _has_outline(record: dict) -> bool:
     return isinstance(outline, (list, tuple)) and len(outline) >= 3
 
 
+def _has_bbox(record: dict) -> bool:
+    """True when a record carries a usable WGS84 bounding box."""
+    bbox = record.get("bbox_wgs84")
+    return (isinstance(bbox, (list, tuple)) and len(bbox) >= 4
+            and all(_number(value) is not None for value in bbox[:4]))
+
+
 def _numbers_are_distinct(first: float, second: float) -> bool:
     """Reject ties without making large values accidentally equal."""
     return not math.isclose(first, second, rel_tol=1e-12, abs_tol=1e-12)
+
+
+def nice_ceiling(value: float) -> float:
+    """Round up to 1, 2, 2.5 or 5 times a power of ten (an axis-friendly maximum)."""
+    if not value or value <= 0 or not math.isfinite(value):
+        return 1.0
+    power = 10 ** math.floor(math.log10(value))
+    for step in (1.0, 2.0, 2.5, 5.0, 10.0):
+        if step * power >= value * (1 - 1e-12):
+            return step * power
+    return 10.0 * power
+
+
+def bearing_margin(bearing_deg: float) -> float:
+    """Degrees between a bearing and the nearest 8-point sector boundary."""
+    offset = (bearing_deg - 22.5) % 45.0
+    return min(offset, 45.0 - offset)
+
+
+# ── LCG (non-cryptographic) ──────────────────────────────────────────────────
 
 
 class LCG:
     """Tiny non-cryptographic generator for harmless game shuffling.
 
     Avoids the stdlib ``random`` module so QGIS Hub's B311 scan stays quiet;
-    cryptographic randomness is neither needed nor claimed here.
+    cryptographic randomness is neither needed nor claimed here. Draws use the
+    *high* bits (multiply-shift): the low bits of a power-of-two LCG cycle with
+    a tiny period, so ``state % 2`` would simply alternate.
     """
 
     def __init__(self, seed: int | None = None):
-        self.state = int(20260720 if seed is None else seed) & 0xFFFFFFFF
+        if seed is None:
+            seed = time.time_ns()
+        self.state = int(seed) & 0xFFFFFFFF
 
     def _next(self) -> int:
         self.state = (1664525 * self.state + 1013904223) & 0xFFFFFFFF
         return self.state
 
+    def below(self, limit: int) -> int:
+        """Return an integer in ``[0, limit)``."""
+        if limit <= 0:
+            raise ValueError("limit must be positive")
+        return (self._next() * limit) >> 32
+
+    def uniform(self) -> float:
+        """Return a float in ``[0, 1)``."""
+        return self._next() / 4294967296.0
+
     def choice(self, items):
-        return items[self._next() % len(items)]
+        return items[self.below(len(items))]
 
     def shuffled(self, items) -> list:
         result = list(items)
         for i in range(len(result) - 1, 0, -1):
-            j = self._next() % (i + 1)
+            j = self.below(i + 1)
             result[i], result[j] = result[j], result[i]
         return result
 
@@ -124,15 +188,16 @@ class LCG:
 
 
 class Joker:
-    """Manages three one-shot joker abilities per quest."""
+    """Manages one-shot joker abilities per quest."""
 
-    ELIMINATE = "eliminate"    # remove 2 wrong multiple-choice options
-    VALUE_HINT = "value_hint"  # narrow slider range by 50 %
+    ELIMINATE = "eliminate"    # remove wrong multiple-choice options
+    VALUE_HINT = "value_hint"  # narrow the input range to a window around the answer
     MAP_HINT = "map_hint"      # zoom canvas to hint area
 
-    def __init__(self, count: int = 3):
-        self._pool = count  # total jokers; distribute across types
+    def __init__(self, count: int = 3, rng: LCG | None = None):
+        self._pool = count  # total jokers; each type at most once
         self._used: set[str] = set()
+        self._rng = rng if rng is not None else LCG()
 
     @property
     def remaining(self) -> int:
@@ -147,22 +212,41 @@ class Joker:
         self._used.add(jtype)
         return True
 
+    @staticmethod
+    def can_eliminate(choices: list, answer) -> bool:
+        """Eliminate only helps when two wrong options exist (one always stays)."""
+        return sum(1 for choice in choices if str(choice) != str(answer)) >= 2
+
     def eliminate(self, choices: list, answer) -> list:
-        """Return choices with 2 wrong options removed (uses one joker)."""
-        if not self.use(self.ELIMINATE):
+        """Return choices with up to 2 wrong options removed (uses one joker).
+
+        At least one wrong option always survives, and a question where
+        nothing can be removed does not consume the joker.
+        """
+        if not self.can_eliminate(choices, answer) or not self.use(self.ELIMINATE):
             return choices
         wrong = [c for c in choices if str(c) != str(answer)]
-        rng = LCG()
-        remove = set(rng.sample(wrong, min(2, max(0, len(wrong) - 1))))
+        remove = set(self._rng.sample(wrong, min(2, len(wrong) - 1)))
         return [c for c in choices if c not in remove]
 
-    def narrow_range(self, lo: float, hi: float) -> tuple[float, float]:
-        """Narrow a slider range by 50 % around its midpoint (uses one joker)."""
+    def narrow_range(self, lo: float, hi: float,
+                     truth: float | None = None) -> tuple[float, float]:
+        """Halve an input range (uses one joker).
+
+        With ``truth`` the half-width window is placed at a random offset that
+        always contains the answer — a window around the midpoint could exclude
+        it and turn the joker into a trap.
+        """
         if not self.use(self.VALUE_HINT):
             return lo, hi
-        center = (lo + hi) / 2.0
-        quarter = (hi - lo) / 4.0
-        return max(lo, center - quarter), min(hi, center + quarter)
+        width = (hi - lo) / 2.0
+        if truth is None or not math.isfinite(truth) or width <= 0:
+            center = (lo + hi) / 2.0
+            return max(lo, center - width / 2.0), min(hi, center + width / 2.0)
+        truth = min(hi, max(lo, truth))
+        start = truth - width * (0.15 + 0.7 * self._rng.uniform())
+        start = min(hi - width, max(lo, start))
+        return start, start + width
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
@@ -175,8 +259,8 @@ def _label(record: dict) -> str:
 
 def _distance_m(a: dict, b: dict) -> float:
     """Haversine distance in metres between two WGS84 lon/lat centroids."""
-    lon1, lat1 = (math.radians(float(v)) for v in a["centroid"])
-    lon2, lat2 = (math.radians(float(v)) for v in b["centroid"])
+    lon1, lat1 = (math.radians(float(v)) for v in a["centroid"][:2])
+    lon2, lat2 = (math.radians(float(v)) for v in b["centroid"][:2])
     dlon, dlat = lon2 - lon1, lat2 - lat1
     h = math.sin(dlat / 2) ** 2 + math.cos(lat1) * math.cos(lat2) * math.sin(dlon / 2) ** 2
     return 6_371_008.8 * 2 * math.asin(min(1.0, math.sqrt(h)))
@@ -196,8 +280,8 @@ COMPASS_DIRECTIONS = (
 
 def _bearing_deg(a: dict, b: dict) -> float:
     """Forward geodetic azimuth in degrees (0..360) from centroid A to centroid B."""
-    lon1, lat1 = (math.radians(float(v)) for v in a["centroid"])
-    lon2, lat2 = (math.radians(float(v)) for v in b["centroid"])
+    lon1, lat1 = (math.radians(float(v)) for v in a["centroid"][:2])
+    lon2, lat2 = (math.radians(float(v)) for v in b["centroid"][:2])
     dlon = lon2 - lon1
     y = math.sin(dlon) * math.cos(lat2)
     x = math.cos(lat1) * math.sin(lat2) - math.sin(lat1) * math.cos(lat2) * math.cos(dlon)
@@ -207,23 +291,8 @@ def _bearing_deg(a: dict, b: dict) -> float:
 
 def compass_direction(bearing_deg: float) -> tuple[str, int]:
     """Map azimuth in degrees to 8-point compass direction name and nominal angle."""
-    b = bearing_deg % 360.0
-    if b >= 337.5 or b < 22.5:
-        return "North", 0
-    elif 22.5 <= b < 67.5:
-        return "North-East", 45
-    elif 67.5 <= b < 112.5:
-        return "East", 90
-    elif 112.5 <= b < 157.5:
-        return "South-East", 135
-    elif 157.5 <= b < 202.5:
-        return "South", 180
-    elif 202.5 <= b < 247.5:
-        return "South-West", 225
-    elif 247.5 <= b < 292.5:
-        return "West", 270
-    else:
-        return "North-West", 315
+    index = int(((bearing_deg % 360.0) + 22.5) // 45.0) % 8
+    return COMPASS_DIRECTIONS[index]
 
 
 # ── Question factory ──────────────────────────────────────────────────────────
@@ -232,83 +301,135 @@ def compass_direction(bearing_deg: float) -> tuple[str, int]:
 class QuestionFactory:
     """Build varied, non-repeating questions from serialisable records."""
 
-    def __init__(self, records: list[dict], seed: int | None = None):
+    def __init__(self, records: list[dict], seed: int | None = None,
+                 value_label: str = "value"):
         self.records = display_records(records)
         self.rng = LCG(seed)
+        self.value_label = str(value_label or "").strip() or "value"
+        self.metric = comparison_metric(self.records)
         self._recent: list[tuple] = []
+        self._cache: dict[str, object] = {}
+
+    def _cached(self, key: str, build):
+        if key not in self._cache:
+            self._cache[key] = build()
+        return self._cache[key]
+
+    def _valued(self) -> list[dict]:
+        return self._cached("valued", lambda: [
+            record for record in self.records if _number(record.get("value")) is not None])
 
     def _value_pairs(self) -> list[tuple[dict, dict, float, float]]:
         """Return every non-tied pair usable by Value Duel."""
-        candidates = [
-            (record, value) for record in self.records
-            if (value := _comparison_value(record)) is not None
-        ]
-        return [
-            (first, second, first_value, second_value)
-            for index, (first, first_value) in enumerate(candidates)
-            for second, second_value in candidates[index + 1:]
-            if _numbers_are_distinct(first_value, second_value)
-        ]
+        def build():
+            candidates = [
+                (record, value) for record in self.records
+                if (value := _number(record.get(self.metric))) is not None
+            ]
+            return [
+                (first, second, first_value, second_value)
+                for index, (first, first_value) in enumerate(candidates)
+                for second, second_value in candidates[index + 1:]
+                if _numbers_are_distinct(first_value, second_value)
+            ]
+        return self._cached("value_pairs", build)
 
-    def _distance_pairs(self) -> list[tuple[dict, dict]]:
+    def _distance_pairs(self) -> list[tuple[dict, dict, float]]:
         """Return feature pairs with valid, non-zero geographic separation."""
-        valid_records = [record for record in self.records if _centroid(record) is not None]
-        return [
-            (first, second)
-            for index, first in enumerate(valid_records)
-            for second in valid_records[index + 1:]
-            if _distance_m(first, second) > 0.01
-        ]
+        def build():
+            valid = [record for record in self.records if _centroid(record) is not None]
+            pairs = []
+            for index, first in enumerate(valid):
+                for second in valid[index + 1:]:
+                    metres = _distance_m(first, second)
+                    if metres > 0.01:
+                        pairs.append((first, second, metres))
+            return pairs
+        return self._cached("distance_pairs", build)
+
+    def distance_scale(self) -> dict:
+        """Return the unit and input maximum for Distance Guess.
+
+        Both derive from the widest pair in the quest, never from the answer,
+        so the input range cannot leak the distance being asked for.
+        """
+        def build():
+            widest = max((metres for _, _, metres in self._distance_pairs()), default=0.0)
+            unit = "m" if widest < METRE_UNIT_LIMIT_M else "km"
+            factor = 1.0 if unit == "m" else 1000.0
+            return {"unit": unit, "factor": factor, "widest_m": widest,
+                    "input_max": nice_ceiling(widest * 1.1 / factor)}
+        return self._cached("distance_scale", build)
+
+    def _guess_pairs(self) -> list[tuple[dict, dict, float]]:
+        """Distance pairs long enough to be a fair estimate at the quest's scale."""
+        def build():
+            pairs = self._distance_pairs()
+            floor = self.distance_scale()["widest_m"] * MIN_DISTANCE_SHARE
+            fair = [pair for pair in pairs if pair[2] >= floor]
+            return fair or pairs
+        return self._cached("guess_pairs", build)
+
+    def _direction_pairs(self) -> list[tuple[dict, dict, float]]:
+        """Directed pairs whose bearing is clearly inside one compass sector."""
+        def build():
+            directed = []
+            for first, second, _ in self._distance_pairs():
+                for origin, target in ((first, second), (second, first)):
+                    bearing = _bearing_deg(origin, target)
+                    if bearing_margin(bearing) >= BEARING_MARGIN_DEG:
+                        directed.append((origin, target, bearing))
+            if directed:
+                return directed
+            return [(a, b, _bearing_deg(a, b)) for a, b, _ in self._distance_pairs()]
+        return self._cached("direction_pairs", build)
 
     def _nearest_options(self) -> list[tuple[dict, list[dict]]]:
         """Return references whose nearest candidate is objectively unique."""
-        valid_records = [record for record in self.records if _centroid(record) is not None]
-        options: list[tuple[dict, list[dict]]] = []
-        for reference in valid_records:
-            ranked = sorted(
-                ((_distance_m(reference, record), record) for record in valid_records
-                 if _record_key(record) != _record_key(reference)),
-                key=lambda item: item[0])
-            if len(ranked) < 4 or ranked[0][0] <= 0.01:
-                continue
-            if _numbers_are_distinct(ranked[0][0], ranked[1][0]):
-                options.append((reference, [record for _, record in ranked]))
-        return options
-
+        def build():
+            valid = [record for record in self.records if _centroid(record) is not None]
+            options: list[tuple[dict, list[dict]]] = []
+            for reference in valid:
+                ranked = sorted(
+                    ((_distance_m(reference, record), record) for record in valid
+                     if _record_key(record) != _record_key(reference)),
+                    key=lambda item: item[0])
+                if len(ranked) < 4 or ranked[0][0] <= 0.01:
+                    continue
+                if _numbers_are_distinct(ranked[0][0], ranked[1][0]):
+                    options.append((reference, [record for _, record in ranked]))
+            return options
+        return self._cached("nearest_options", build)
 
     def available_modes(self, modes: list[str] | tuple[str, ...] | None = None) -> list[str]:
         """Return modes with enough valid data to create a fair question."""
         candidates = MODES if modes is None else modes
-        valued = [record for record in self.records if _number(record.get("value")) is not None]
-        value_pairs = self._value_pairs()
-        distance_pairs = self._distance_pairs()
-        nearest_options = self._nearest_options()
-        unique_values = {_number(record.get("value")) for record in valued}
-        silhouette_count = sum(_has_outline(record) for record in self.records)
+        unique_values = {_number(record.get("value")) for record in self._valued()}
         available: list[str] = []
         for mode in candidates:
-            if mode == "locate" and self.records:
-                available.append(mode)
-            elif mode == "bigger" and value_pairs:
-                available.append(mode)
-            elif mode == "distance" and distance_pairs:
-                available.append(mode)
-            elif mode == "silhouette" and silhouette_count >= 4:
-                available.append(mode)
-            elif mode == "attr_guess" and len(unique_values) >= 2:
-                available.append(mode)
-            elif mode == "ordering" and len(unique_values) >= 3:
-                available.append(mode)
-            elif mode == "nearest" and nearest_options:
-                available.append(mode)
-            elif mode == "blind_zoom" and len(self.records) >= 2:
-                available.append(mode)
-            elif mode == "direction" and distance_pairs:
+            if mode == "locate":
+                ok = bool(self.records)
+            elif mode == "bigger":
+                ok = bool(self._value_pairs())
+            elif mode in ("distance", "direction"):
+                ok = bool(self._distance_pairs())
+            elif mode == "silhouette":
+                ok = sum(_has_outline(record) for record in self.records) >= 4
+            elif mode == "attr_guess":
+                ok = len(unique_values) >= 2
+            elif mode == "ordering":
+                ok = len(unique_values) >= 3
+            elif mode == "nearest":
+                ok = bool(self._nearest_options())
+            elif mode == "blind_zoom":
+                ok = len(self.records) >= 2 and any(_has_bbox(r) for r in self.records)
+            else:
+                ok = False
+            if ok:
                 available.append(mode)
         return available
 
     def _sample(self, count: int, pool: list[dict] | None = None) -> list[dict]:
-
         source = self.records if pool is None else pool
         if len(source) < count:
             raise ValueError(f"At least {count} features are required for this mode.")
@@ -320,10 +441,23 @@ class QuestionFactory:
                 return picked
         return self.rng.sample(source, count)
 
+    def _pick_pair(self, pairs: list, tag: str):
+        """Pick a pair, avoiding the last few pairs asked."""
+        for _ in range(25):
+            pair = self.rng.choice(pairs)
+            sig = (tag,) + tuple(sorted((_record_key(pair[0]), _record_key(pair[1]))))
+            if sig not in self._recent:
+                self._recent = (self._recent + [sig])[-8:]
+                return pair
+        return self.rng.choice(pairs)
+
     def make(self, mode: str, difficulty: str = "Medium") -> dict:  # noqa: C901
-        diff = DIFFICULTY.get(difficulty, DIFFICULTY["Medium"])
+        if difficulty not in DIFFICULTY:
+            difficulty = "Medium"
+        diff = DIFFICULTY[difficulty]
         n_choices = diff["choices"]
         tolerance = diff["tolerance"]
+        what = self.value_label
 
         # ── locate ───────────────────────────────────────────────────────────
         if mode == "locate":
@@ -342,11 +476,16 @@ class QuestionFactory:
             pairs = self._value_pairs()
             if not pairs:
                 raise ValueError("Value Duel requires at least two different numeric values.")
-            a, b, av, bv = self.rng.choice(pairs)
+            a, b, av, bv = self._pick_pair(pairs, "bigger")
+            if self.rng.below(2):
+                a, b, av, bv = b, a, bv, av
             winner = a if av > bv else b
+            prompt = (f"Which one has the greater {what}?" if self.metric == "value"
+                      else "Which one covers the larger area?")
             return {
                 "mode": mode,
-                "prompt": "Which one has the greater value?",
+                "prompt": prompt,
+                "metric": self.metric,
                 "choices": [_label(a), _label(b)],
                 "answer": _label(winner),
                 "values": {_label(a): av, _label(b): bv},
@@ -354,11 +493,11 @@ class QuestionFactory:
 
         # ── distance ─────────────────────────────────────────────────────────
         if mode == "distance":
-            pairs = self._distance_pairs()
+            pairs = self._guess_pairs()
             if not pairs:
                 raise ValueError("Distance Guess requires two distinct feature locations.")
-            a, b = self.rng.choice(pairs)
-            metres = _distance_m(a, b)
+            a, b, metres = self._pick_pair(pairs, "distance")
+            scale = self.distance_scale()
             return {
                 "mode": mode,
                 "prompt": f"Estimate the distance: {_label(a)} → {_label(b)}",
@@ -366,7 +505,9 @@ class QuestionFactory:
                 "to": _label(b),
                 "answer": metres,
                 "tolerance": tolerance,
-                "unit": "m",
+                "unit": scale["unit"],
+                "unit_factor": scale["factor"],
+                "input_max": scale["input_max"],
             }
 
         # ── silhouette ───────────────────────────────────────────────────────
@@ -374,7 +515,7 @@ class QuestionFactory:
             pool = [record for record in self.records if _has_outline(record)]
             if len(pool) < 4:
                 raise ValueError("Silhouette mode requires at least 4 polygon features.")
-            choices_pool = self.rng.sample(pool, min(n_choices, len(pool)))
+            choices_pool = self._sample(min(n_choices, len(pool)), pool=pool)
             target = self.rng.choice(choices_pool)
             labels = self.rng.shuffled([_label(r) for r in choices_pool])
             return {
@@ -387,7 +528,7 @@ class QuestionFactory:
 
         # ── attr_guess ───────────────────────────────────────────────────────
         if mode == "attr_guess":
-            valued = [record for record in self.records if _number(record.get("value")) is not None]
+            valued = self._valued()
             all_values = [_number(record["value"]) for record in valued]
             if len(set(all_values)) < 2:
                 raise ValueError("Attribute Guess requires at least two different numeric values.")
@@ -395,22 +536,20 @@ class QuestionFactory:
             min_v, max_v = min(all_values), max(all_values)
             return {
                 "mode": mode,
-                "prompt": f"Estimate the value of: {_label(target)}",
+                "prompt": f"Estimate the {what} of {_label(target)}",
                 "target_fid": target["fid"],
                 "answer": _number(target["value"]),
                 "min_val": min_v,
                 "max_val": max_v,
                 "tolerance": tolerance,
-                "tolerance_scale": max(1.0, max_v - min_v),
+                "tolerance_scale": max_v - min_v,
             }
 
         # ── ordering ─────────────────────────────────────────────────────────
         if mode == "ordering":
-            valued = [r for r in self.records if _number(r.get("value")) is not None]
             by_value: dict[float, list[dict]] = {}
-            for record in valued:
-                value = _number(record["value"])
-                by_value.setdefault(value, []).append(record)
+            for record in self._valued():
+                by_value.setdefault(_number(record["value"]), []).append(record)
             count = min(4, len(by_value))
             if count < 3:
                 raise ValueError("Ranking requires at least 3 different numeric values.")
@@ -419,11 +558,13 @@ class QuestionFactory:
             sorted_labels = [_label(r) for r in sorted(items,
                              key=lambda r: _number(r.get("value")), reverse=True)]
             shuffled = self.rng.shuffled(items)
+            if [_label(r) for r in shuffled] == sorted_labels:
+                shuffled = shuffled[1:] + shuffled[:1]  # never start solved
             return {
                 "mode": mode,
-                "prompt": "Rank these from highest to lowest value",
+                "prompt": f"Rank these from highest to lowest {what}",
                 "items": [{"label": _label(r), "fid": r["fid"],
-                            "value": _number(r.get("value"))} for r in shuffled],
+                           "value": _number(r.get("value"))} for r in shuffled],
                 "answer": sorted_labels,
             }
 
@@ -435,8 +576,15 @@ class QuestionFactory:
             reference, ranked_records = self.rng.choice(options)
             choice_count = min(max(2, n_choices), len(ranked_records))
             nearest = ranked_records[0]
-            candidates = [nearest] + self.rng.sample(
-                ranked_records[1:], choice_count - 1)
+            others = ranked_records[1:]
+            # Harder levels draw decoys from closer neighbours.
+            if difficulty == "Hard":
+                pool = others[:max(choice_count * 2, choice_count - 1)]
+            elif difficulty == "Medium":
+                pool = others[:max(len(others) // 2, choice_count - 1)]
+            else:
+                pool = others
+            candidates = [nearest] + self.rng.sample(pool, choice_count - 1)
             choices = self.rng.shuffled([_label(record) for record in candidates])
             return {
                 "mode": mode,
@@ -449,7 +597,10 @@ class QuestionFactory:
 
         # ── blind_zoom ───────────────────────────────────────────────────────
         if mode == "blind_zoom":
-            target = self._sample(1)[0]
+            pool = [record for record in self.records if _has_bbox(record)]
+            if not pool or len(self.records) < 2:
+                raise ValueError("Blind Zoom requires features with a known extent.")
+            target = self._sample(1, pool=pool)[0]
             decoy_pool = [r for r in self.records if _record_key(r) != _record_key(target)]
             decoys = self.rng.sample(decoy_pool, min(n_choices - 1, len(decoy_pool)))
             choices = self.rng.shuffled([_label(target)] + [_label(r) for r in decoys])
@@ -465,11 +616,10 @@ class QuestionFactory:
 
         # ── direction ────────────────────────────────────────────────────────
         if mode == "direction":
-            pairs = self._distance_pairs()
+            pairs = self._direction_pairs()
             if not pairs:
                 raise ValueError("Compass Quest requires two distinct feature locations.")
-            a, b = self.rng.choice(pairs)
-            bearing = _bearing_deg(a, b)
+            a, b, bearing = self._pick_pair(pairs, "direction")
             ans_dir, ans_deg = compass_direction(bearing)
             ans_label = f"{ans_dir} ({ans_deg}°)"
             all_options = [f"{name} ({deg}°)" for name, deg in COMPASS_DIRECTIONS]
@@ -494,6 +644,17 @@ class QuestionFactory:
 # ── Game session ──────────────────────────────────────────────────────────────
 
 
+def score_for(seconds: float, streak: int, closeness: float = 1.0) -> int:
+    """Points for one correct answer: base + speed bonus + streak bonus, scaled.
+
+    ``streak`` is the streak *including* this answer. The offline HTML game
+    uses the same formula, so a score means the same thing in both places.
+    """
+    speed_bonus = max(0, 150 - int(seconds * 8))
+    streak_bonus = min(300, max(0, streak - 1) * 30)
+    return int((500 + speed_bonus + streak_bonus) * closeness)
+
+
 class GameSession:
     """Stateful scoring with streak, lives, timing, difficulty and jokers."""
 
@@ -513,8 +674,8 @@ class GameSession:
         self.rounds = 0
         self.correct = 0
         self.difficulty = difficulty if difficulty in DIFFICULTY else "Medium"
-        self.joker = Joker(max(0, int(joker_count)))
         self.rng = LCG(seed)
+        self.joker = Joker(max(0, int(joker_count)), rng=LCG(self.rng._next()))
         self.started_at = time.monotonic()
         self.question_started_at = self.started_at
         self._awaiting_answer = False
@@ -574,9 +735,7 @@ class GameSession:
             self.correct += 1
             self.streak += 1
             self.best_streak = max(self.best_streak, self.streak)
-            speed_bonus = max(0, 150 - int(seconds * 8))
-            streak_bonus = min(300, max(0, self.streak - 1) * 30)
-            gained = int((500 + speed_bonus + streak_bonus) * closeness)
+            gained = score_for(seconds, self.streak, closeness)
             self.score += gained
         else:
             self.streak = 0

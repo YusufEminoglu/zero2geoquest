@@ -28,4 +28,4 @@ def test_ranking_is_exported_when_the_data_is_valid():
     assert available_html_modes(records, ["locate", "ordering"]) == ["ordering"]
     output = build_html("Ranking quest", records, ["ordering"], 3)
     assert '"modes":["ordering"]' in output
-    assert "function rankChoices" in output
+    assert "function rankList" in output

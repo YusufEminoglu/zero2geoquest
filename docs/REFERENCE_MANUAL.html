@@ -47,8 +47,8 @@
 </aside>
 <main class="chrome-content">
 <h1>02GeoQuest</h1>
-<p class="repo-links"><a href="https://github.com/YusufEminoglu/zero2geoquest">GitHub</a> &middot; <a href="https://gitlab.com/yusufeminoglu/zero2geoquest">GitLab</a></p>
-<p>Playable Map Studio &mdash; turn any QGIS vector layer into an educational quiz game &bull; v1.2.2</p>
+<p class="repo-links"><a href="https://github.com/YusufEminoglu/zero2geoquest">GitHub</a> &middot; <a href="https://gitlab.com/geophilo1/zero2geoquest">GitLab</a></p>
+<p>Playable Map Studio &mdash; turn any QGIS vector layer into an educational quiz game &bull; v1.3.0</p>
 <div class="video-embed">
   <iframe src="https://www.youtube-nocookie.com/embed/YW1386S2ey0" title="02GeoQuest &mdash; video walkthrough" loading="lazy" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share" allowfullscreen></iframe>
 </div>
@@ -64,13 +64,14 @@
 <table>
   <tr><th>Mode</th><th>Description</th><th>Requires</th><th>HTML Export</th></tr>
   <tr><td><strong>Map Hunt</strong> ("locate")</td><td>Click the named feature on the QGIS canvas</td><td>Any features</td><td>&mdash;</td></tr>
-  <tr><td><strong>Value Duel</strong> ("bigger")</td><td>Two features: pick the one with the larger numeric value</td><td>Numeric field</td><td>Yes</td></tr>
-  <tr><td><strong>Distance Guess</strong> ("distance")</td><td>Estimate the ground distance between two places</td><td>Geographic centroids</td><td>Yes</td></tr>
+  <tr><td><strong>Value Duel</strong> ("bigger")</td><td>Two features: pick the one with the larger numeric value (the prompt names the field or its alias); without a numeric field, the larger area</td><td>Numeric field or polygons</td><td>Yes</td></tr>
+  <tr><td><strong>Distance Guess</strong> ("distance")</td><td>Estimate the ground distance between two places, in metres for city-scale quests (widest pair under 20 km) and kilometres otherwise</td><td>Geographic centroids</td><td>Yes</td></tr>
   <tr><td><strong>Know the Shape</strong> ("silhouette")</td><td>Identify a polygon feature from its simplified outline</td><td>4+ polygons</td><td>Yes</td></tr>
   <tr><td><strong>Attribute Guess</strong> ("attr_guess")</td><td>Estimate a numeric attribute via a slider</td><td>2+ numeric values</td><td>Yes</td></tr>
   <tr><td><strong>Ranking</strong> ("ordering")</td><td>Order 3&ndash;4 features from highest to lowest value</td><td>3+ distinct values</td><td>Yes</td></tr>
   <tr><td><strong>Nearest Neighbour</strong> ("nearest")</td><td>Identify which feature is closest to a reference</td><td>4+ valid records</td><td>Yes</td></tr>
-  <tr><td><strong>Blind Zoom</strong> ("blind_zoom")</td><td>Canvas zooms to a feature; name it</td><td>2+ records</td><td>&mdash;</td></tr>
+  <tr><td><strong>Blind Zoom</strong> ("blind_zoom")</td><td>Canvas zooms to a feature; name it. Point features get at least ~300 m of context</td><td>2+ records with a known extent</td><td>&mdash;</td></tr>
+  <tr><td><strong>Compass Quest</strong> ("direction")</td><td>Pick the 8-point compass direction from one place to another (forward geodetic azimuth). Pairs within 5&deg; of a sector boundary are never asked</td><td>Geographic centroids</td><td>Yes</td></tr>
 </table>
 <p>Map Hunt and Blind Zoom are excluded from HTML export because they require QGIS canvas interaction.</p>
 </section>
@@ -83,7 +84,7 @@
   <tr><td>Medium</td><td>30 s</td><td>4</td><td>0.25</td></tr>
   <tr><td>Hard</td><td>15 s</td><td>6</td><td>0.10</td></tr>
 </table>
-<p>Tolerance governs the acceptable error ratio for distance guesses and attribute slider estimates. A tolerance of 0.25 means the estimate must be within &plusmn;25% of the true value.</p>
+<p>Tolerance governs the acceptable error for distance guesses and attribute slider estimates. For Distance Guess it is relative to the true distance (0.25 means within &plusmn;25%); for Attribute Guess it is relative to the value range of the quest, so zero and negative values are judged fairly. The distance input range comes from the widest pair in the quest and starts at zero, so it never reveals the answer. On Medium and Hard, Nearest Neighbour draws its wrong options from progressively closer neighbours.</p>
 </section>
 
 <section id="jokers">
@@ -91,9 +92,9 @@
 <div class="chrome-card">
   <h4>Three Joker Types, Each Usable Once Per Quest</h4>
   <ul>
-    <li><strong>Eliminate:</strong> Removes 2 wrong multiple-choice options. Available in: Value Duel, Silhouette, Nearest Neighbour, Blind Zoom.</li>
-    <li><strong>Value Hint:</strong> Narrows a slider or spinbox range by 50% around its midpoint. Available in: Attribute Guess, Distance Guess.</li>
-    <li><strong>Map Hint:</strong> Zooms the canvas to a wider hint area (2.5&times; the feature's bounding box). Available in: Map Hunt.</li>
+    <li><strong>Eliminate:</strong> Removes up to 2 wrong multiple-choice options; at least one wrong option always stays. Offered only when two wrong options exist, so it is never spent on a two-way Value Duel. Available in: Silhouette, Nearest Neighbour, Blind Zoom, Compass Quest.</li>
+    <li><strong>Value Hint:</strong> Halves the input range to a window that always contains the answer, placed at a random offset. Available in: Attribute Guess, Distance Guess.</li>
+    <li><strong>Map Hint:</strong> Zooms the canvas to a window four times the feature's extent (at least ~1 km for points), off-centre so the target is inside but not in the middle. Available in: Map Hunt, Blind Zoom.</li>
   </ul>
   <p>Default joker pool: 3 total (configurable 0&ndash;9).</p>
 </div>
@@ -116,9 +117,9 @@
 <h2 id="params">6. Builder Controls</h2>
 <table>
   <tr><th>Section</th><th>Control</th><th>Options</th></tr>
-  <tr><td>Source Layer</td><td>Layer picker, label field, numeric field</td><td>Single vector layer (layer A)</td></tr>
+  <tr><td>Source Layer</td><td>Layer picker, label field, numeric field</td><td>Single vector layer (layer A). Layers above 500 features are sampled evenly across the whole layer</td></tr>
   <tr><td>Second Layer</td><td>Checkbox toggle, duplicate controls</td><td>Optional cross-layer play (layer B)</td></tr>
-  <tr><td>Challenge Mix</td><td>8 checkboxes</td><td>Modes auto-filtered by data availability</td></tr>
+  <tr><td>Challenge Mix</td><td>9 checkboxes</td><td>Modes without suitable data are skipped at start, with the reason shown</td></tr>
   <tr><td>Difficulty</td><td>Three toggle buttons (Easy / Medium / Hard)</td><td>Affects timer, choices, tolerance</td></tr>
   <tr><td>Quest Rules</td><td>Title combo with presets, rounds (3&ndash;60), lives (1&ndash;10), jokers (0&ndash;9)</td><td>Preset titles: My Map Quest, City Explorer, Data Detective, etc.</td></tr>
 </table>
@@ -130,12 +131,13 @@
   <li>Open the 02GeoQuest dock from the toolbar.</li>
   <li>On the <strong>Builder</strong> tab, select a vector layer. Optionally add a second layer for cross-layer play.</li>
   <li>Choose a label field (for display names) and an optional numeric field (for value-based modes).</li>
-  <li>Select game modes from the 8 checkboxes. Modes lacking sufficient data are auto-greyed.</li>
+  <li>Select game modes from the 9 checkboxes. Modes lacking sufficient data are skipped when the quest starts, and the Builder says which and why.</li>
   <li>Set difficulty and quest rules (rounds, lives, jokers).</li>
   <li>Click <em>Start the quest</em>. The dock switches to the <strong>Play</strong> page.</li>
   <li>Questions appear in sequence with the appropriate input widget (multiple-choice buttons, slider, spinbox, or map pick).</li>
-  <li>The timer bar changes colour at 50% (yellow) and 25% (red). Use jokers as needed.</li>
-  <li>After the last round or when lives reach zero, the final score is saved to the leaderboard.</li>
+  <li>The timer bar changes colour at 50% (yellow) and 25% (red). Use jokers as needed. With the dock focused, keys 1&ndash;9 pick an answer and Enter submits or moves on.</li>
+  <li>In Map Hunt, <em>Pick on map</em> re-activates the picking tool if you switched to pan or zoom. Overlapping features under the click all count.</li>
+  <li>After the last round or when lives reach zero, the final score is saved to the leaderboard. <em>Play again</em> replays the same source: the loaded Quest Pack, or the Builder's layer.</li>
 </ol>
 </section>
 
@@ -153,17 +155,18 @@
 <h2 id="export">9. Offline HTML Game Export</h2>
 <div class="chrome-card">
   <h4>Self-Contained, Zero-Dependency HTML</h4>
-  <p>Exports a single HTML file with an embedded JavaScript game engine that fully reimplements the question generation and scoring logic. Excludes Map Hunt and Blind Zoom modes. Features: dark mode with CSS custom properties and localStorage persistence, responsive single-column layout below 560 px, score animation with CSS keyframes, progress dots (violet=pending, green=correct, red=wrong), ranking via Up/Down buttons, results screen with replay, and XSS-safe JSON embedding (angle brackets escaped to Unicode sequences). Zero CDN, zero network calls, zero tracking.</p>
+  <p>Exports a single HTML file with an embedded JavaScript game engine that reimplements the question generation and uses the same scoring formula, difficulty (timer, choices, tolerance) and lives as the QGIS quest. Excludes Map Hunt and Blind Zoom. Each page load is seeded from the browser's random source, so replays differ. Features: balanced mode rotation, keyboard play (1&ndash;9, Enter), dark mode following the system setting with a toggle, responsive single-column layout below 560 px, proportional silhouettes, progress dots, ranking via Up/Down buttons, a results screen with best streak and a per-device personal best, and in-place replay. Embedded data cannot close the script element (<code>&lt;/</code> is escaped), labels are inserted as text, and only label, value, area, centroid and outline leave QGIS. Zero CDN, zero network calls, zero tracking.</p>
 </div>
 </section>
 
 <section id="technical">
 <h2 id="technical">10. Technical Notes</h2>
 <ul>
-  <li><strong>Pure-Python core:</strong> The game engine, question factory, scoring, and profile manager have zero QGIS imports and are independently testable with plain CPython.</li>
-  <li><strong>LCG-based PRNG:</strong> A Knuth MMIX linear congruential generator (state 32-bit, seed from <code>time.time_ns()</code>) avoids stdlib <code>random</code> to keep QGIS Hub Bandit B311 scans clean.</li>
+  <li><strong>Pure-Python core:</strong> The game engine, question factory, scoring, Quest Packs and HTML exporter have zero QGIS imports and are tested with plain CPython; the profile manager only needs <code>QgsSettings</code>.</li>
+  <li><strong>LCG-based PRNG:</strong> A 32-bit linear congruential generator (Numerical Recipes constants, seeded from <code>time.time_ns()</code>) avoids stdlib <code>random</code> to keep QGIS Hub Bandit B311 scans clean. Draws use the high bits, because the low bits of a power-of-two LCG repeat with a tiny period.</li>
   <li><strong>Layer data serialisation:</strong> Features are immediately serialised to plain dictionaries with no QGIS object references held, keeping memory predictable and enabling pure-Python tests.</li>
-  <li><strong>Question factory:</strong> Maintains an 8-deep short-term memory of recent feature combinations to avoid repeats; pre-computes all valid pairs, distance pairs, and nearest-neighbour options on construction.</li>
+  <li><strong>Question factory:</strong> Maintains an 8-deep short-term memory of recent feature combinations and pairs to avoid repeats; computes valid pairs, distance pairs and nearest-neighbour options once, on first use, and reuses them. Value Duel compares the numeric field whenever it has two different values and area only otherwise, never a mix of both.</li>
+  <li><strong>Starter packs:</strong> All populations come from one source and one definition &mdash; UN DESA, <em>World Urbanization Prospects 2018</em>, urban agglomeration population in 2018, rounded to the nearest thousand.</li>
   <li><strong>Adaptive theme:</strong> All UI colours derive from the active Qt <code>QPalette</code> with WCAG 4.5:1 contrast compliance. Reapplies on <code>PaletteChange</code> and <code>ApplicationPaletteChange</code> events.</li>
   <li><strong>QGIS compatibility:</strong> 3.34 through 4.x. Dual Qt5/Qt6 support via try/except for <code>QAction</code> import location.</li>
 </ul>

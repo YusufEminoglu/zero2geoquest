@@ -9,15 +9,22 @@ from qgis.core import (
     QgsCoordinateReferenceSystem,
     QgsCoordinateTransform,
     QgsDistanceArea,
+    QgsFeatureRequest,
     QgsGeometry,
     QgsPointXY,
     QgsProject,
+    QgsRectangle,
     QgsWkbTypes,
 )
 
 
-def _first_outline(geometry: QgsGeometry, limit: int = 240) -> list[list[float]]:
-    """Return a simplified exterior ring in layer coordinates."""
+def _first_outline(geometry: QgsGeometry, limit: int = 240,
+                   x_scale: float = 1.0) -> list[list[float]]:
+    """Return a simplified exterior ring in layer coordinates.
+
+    ``x_scale`` compresses longitudes for geographic layers (cos of the
+    latitude), otherwise a degree-based silhouette is stretched east-west.
+    """
     if not geometry or geometry.isEmpty():
         return []
     geom = geometry
@@ -42,28 +49,54 @@ def _first_outline(geometry: QgsGeometry, limit: int = 240) -> list[list[float]]
         return []
     ring = max(rings, key=len)
     step = max(1, math.ceil(len(ring) / limit))
-    return [[float(point.x()), float(point.y())] for point in ring[::step]]
+    return [[float(point.x()) * x_scale, float(point.y())] for point in ring[::step]]
+
+
+def _field_request(layer, *field_names: str) -> QgsFeatureRequest:
+    """Fetch geometry plus only the attributes the quest needs."""
+    request = QgsFeatureRequest()
+    names = [name for name in field_names if name]
+    if names:
+        request.setSubsetOfAttributes(names, layer.fields())
+    else:
+        request.setNoAttributes()
+    return request
 
 
 def records_from_layer(layer, label_field: str = "", value_field: str = "",
                        maximum: int = 500) -> list[dict]:
-    """Snapshot non-empty features without retaining QGIS feature objects."""
+    """Snapshot non-empty features without retaining QGIS feature objects.
+
+    Layers larger than ``maximum`` are thinned with an even stride over the
+    whole layer, so a quest from 20,000 parcels is not just the first 500
+    rows of the table (usually one corner of the map).
+    """
     if layer is None or not layer.isValid():
         raise ValueError("Choose a valid vector layer.")
+    project = QgsProject.instance()
     distance = QgsDistanceArea()
-    distance.setSourceCrs(layer.crs(), QgsProject.instance().transformContext())
-    distance.setEllipsoid(QgsProject.instance().ellipsoid() or "WGS84")
+    distance.setSourceCrs(layer.crs(), project.transformContext())
+    distance.setEllipsoid(project.ellipsoid() or "WGS84")
     wgs84 = QgsCoordinateReferenceSystem("EPSG:4326")
-    to_wgs84 = QgsCoordinateTransform(
-        layer.crs(), wgs84, QgsProject.instance().transformContext())
+    to_wgs84 = QgsCoordinateTransform(layer.crs(), wgs84, project.transformContext())
+    geographic = layer.crs().isGeographic()
+
+    total = layer.featureCount()
+    thin = bool(total and total > maximum)
+
     records: list[dict] = []
-    for feature in layer.getFeatures():
+    for index, feature in enumerate(layer.getFeatures(
+            _field_request(layer, label_field, value_field))):
+        # Fractional stride: keep feature i when floor(i * maximum / total)
+        # advances, which spreads exactly `maximum` picks over the table.
+        if thin and index and (index * maximum) // total == ((index - 1) * maximum) // total:
+            continue
         geometry = feature.geometry()
         if not geometry or geometry.isEmpty():
             continue
         label_value = feature[label_field] if label_field else feature.id()
         label = str(label_value).strip() if label_value is not None else ""
-        if not label:
+        if not label or label == "NULL":
             label = f"Feature {feature.id()}"
         value = None
         if value_field:
@@ -77,10 +110,15 @@ def records_from_layer(layer, label_field: str = "", value_field: str = "",
             area = abs(float(distance.measureArea(geometry)))
         except Exception:
             area = 0.0
-        centroid = geometry.pointOnSurface().asPoint()
+        anchor = geometry.pointOnSurface()
+        if not anchor or anchor.isEmpty():
+            anchor = geometry.centroid()
+        if not anchor or anchor.isEmpty():
+            continue
+        centroid = anchor.asPoint()
         try:
-            geographic = to_wgs84.transform(centroid)
-            lon_lat = [float(geographic.x()), float(geographic.y())]
+            point = to_wgs84.transform(centroid)
+            lon_lat = [float(point.x()), float(point.y())]
         except Exception:
             lon_lat = [float(centroid.x()), float(centroid.y())]
         # Bounding box in WGS84 — needed for blind_zoom canvas extent
@@ -93,7 +131,8 @@ def records_from_layer(layer, label_field: str = "", value_field: str = "",
             cx, cy = lon_lat
             buf = 0.002
             bbox_wgs84 = [cx - buf, cy - buf, cx + buf, cy + buf]
-        outline = _first_outline(geometry)
+        x_scale = math.cos(math.radians(centroid.y())) if geographic else 1.0
+        outline = _first_outline(geometry, x_scale=max(0.05, x_scale))
         records.append({
             "fid": int(feature.id()),
             "label": label,
@@ -113,28 +152,49 @@ def records_from_layer(layer, label_field: str = "", value_field: str = "",
 def merge_layers(layer_a, label_a: str, value_a: str,
                  layer_b, label_b: str, value_b: str,
                  maximum: int = 500) -> list[dict]:
-    """Combine records from two layers (up to maximum total)."""
+    """Combine records from two layers (up to maximum total).
+
+    Picking the same layer twice adds nothing but duplicate features, so the
+    second copy is ignored.
+    """
+    if layer_b is None or layer_b.id() == layer_a.id():
+        return records_from_layer(layer_a, label_a, value_a, maximum)
     half = maximum // 2
     records_a = records_from_layer(layer_a, label_a, value_a, half)
     records_b = records_from_layer(layer_b, label_b, value_b, maximum - len(records_a))
     return records_a + records_b
 
 
-def feature_at_point(layer, point, tolerance: float) -> int | None:
-    """Return the containing or nearest feature id around a canvas point."""
+def features_at_point(layer, point, tolerance: float) -> list[int]:
+    """Return feature ids hit by a click: containing features first, then by distance.
+
+    Uses a spatial filter, so a click on a 100,000-feature layer does not scan
+    every geometry. Overlapping polygons all count as hit.
+    """
     if layer is None:
-        return None
-    best_id = None
-    best_distance = float("inf")
-    click = QgsGeometry.fromPointXY(point)
-    for feature in layer.getFeatures():
+        return []
+    tolerance = max(float(tolerance), 0.0)
+    rect = QgsRectangle(point.x() - tolerance, point.y() - tolerance,
+                        point.x() + tolerance, point.y() + tolerance)
+    request = QgsFeatureRequest().setFilterRect(rect)
+    request.setNoAttributes()
+    click = QgsGeometry.fromPointXY(QgsPointXY(point.x(), point.y()))
+    containing: list[int] = []
+    near: list[tuple[float, int]] = []
+    for feature in layer.getFeatures(request):
         geometry = feature.geometry()
         if not geometry or geometry.isEmpty():
             continue
-        if geometry.contains(click) or geometry.intersects(click):
-            return int(feature.id())
-        distance = geometry.distance(click)
-        if distance < best_distance:
-            best_distance = distance
-            best_id = int(feature.id())
-    return best_id if best_distance <= tolerance else None
+        if geometry.intersects(click):
+            containing.append(int(feature.id()))
+            continue
+        gap = geometry.distance(click)
+        if gap <= tolerance:
+            near.append((gap, int(feature.id())))
+    return containing + [fid for _, fid in sorted(near)]
+
+
+def feature_at_point(layer, point, tolerance: float) -> int | None:
+    """Return the containing or nearest feature id around a canvas point."""
+    hits = features_at_point(layer, point, tolerance)
+    return hits[0] if hits else None

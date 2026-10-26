@@ -3,7 +3,7 @@ name=02GeoQuest - Playable Map Studio
 qgisMinimumVersion=3.34
 qgisMaximumVersion=4.99
 description=Turn any vector layer into a polished geography game, classroom challenge or public-engagement quest.
-version=1.2.3
+version=1.3.0
 author=Yusuf Eminoglu
 email=yusuf.eminoglu@deu.edu.tr
 
@@ -23,6 +23,20 @@ hasProcessingProvider=no
 license=GPL-3
 
 changelog=
+    1.3.0 - Fair, Answerable Rounds Everywhere:
+        Fixed: Ranking and Attribute Guess could only be submitted once per QGIS session; later rounds were lost on the timer.
+        Fixed: Compass Quest showed no answer buttons in QGIS.
+        Fixed: Distance Guess started at three quarters of the answer, which scored as correct on Easy and Medium without any input. Its range now comes from the whole quest, in metres for city-scale data.
+        Fixed: The Value Hint joker could exclude the answer; its window now always contains it. Eliminate is no longer spent on two-way duels.
+        Fixed: Play again after a Quest Pack switched to the selected layer; replay and HTML export now keep the pack.
+        Fixed: Value Duel compared a numeric field with polygon area when only some features had values.
+        Fixed: Blind Zoom and Map Hint on point layers zoomed to an empty extent.
+        Fixed: Map Hunt ignored the target when another polygon overlapped it, and scanned the whole layer per click.
+        Fixed: Starter pack populations mixed city-proper and metropolitan figures; all three packs now use UN World Urbanization Prospects 2018.
+        Fixed: Silhouettes from geographic layers were stretched east-west; offline silhouettes were stretched to fill the frame.
+        Fixed: The offline HTML game asked the same questions on every load and in every replay.
+        Added: Offline HTML uses the quest difficulty, lives and scoring formula, keyboard play, best streak and a personal best.
+        Added: Keys 1-9 and Enter in the dock, a Pick on map button, prompts naming the chosen field, evenly sampled large layers.
     1.2.3 - Redesign plugin icon to high-end 3D tactile brand design with circular teal pedestal, zero margin, and refreshed documentation links.
     1.2.1 - Hub Metadata Compatibility:
         Fixed: Removed a literal percent character from plugin metadata so QGIS Hub can parse and validate the release package.

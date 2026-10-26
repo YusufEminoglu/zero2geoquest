@@ -2,13 +2,15 @@
 """Polished dock interface for building, playing and sharing GeoQuests."""
 from __future__ import annotations
 
+import html
 import json
 import math
 import os
 import time
+from contextlib import suppress
 
 from qgis.PyQt.QtCore import QEvent, QPointF, Qt, QTimer, pyqtSignal
-from qgis.PyQt.QtGui import QColor, QPainter, QPainterPath, QPen, QPixmap
+from qgis.PyQt.QtGui import QColor, QKeySequence, QPainter, QPainterPath, QPen, QPixmap
 from qgis.PyQt.QtWidgets import (
     QAbstractItemView, QCheckBox, QComboBox, QDockWidget, QDoubleSpinBox,
     QFileDialog, QFormLayout, QGridLayout, QGroupBox, QHBoxLayout, QLabel,
@@ -21,16 +23,23 @@ from qgis.core import (
 )
 from qgis.gui import QgsFieldComboBox, QgsHighlight, QgsMapLayerComboBox
 
+try:
+    from qgis.PyQt.QtWidgets import QShortcut
+except ImportError:  # pragma: no cover - Qt6
+    from qgis.PyQt.QtGui import QShortcut
+
 from ..core.certificate import generate_certificate_html
 from ..core.exporter import HTML_MODES, write_html
-from ..core.game import DIFFICULTY, MODES, GameSession, QuestionFactory
-from ..core.layer_data import feature_at_point, merge_layers, records_from_layer
+from ..core.game import DIFFICULTY, MODES, GameSession, Joker, QuestionFactory
+from ..core.layer_data import features_at_point, merge_layers, records_from_layer
 from ..core.profiles import AVATARS, ProfileManager
 from ..core.quest_pack import STARTER_PACKS, export_pack, import_pack, validate_pack
 from .theme import apply_adaptive_theme, dock_color_tokens
 
 PLUGIN_TITLE = "02GeoQuest — Playable Map Studio"
 SETTINGS_KEY = "zero2geoquest/leaderboard"
+# Smallest canvas window (degrees, ~300 m) for point features in Blind Zoom / Map Hint.
+MIN_ZOOM_SPAN_DEG = 0.003
 
 # ── Mode metadata ──────────────────────────────────────────────────────────────
 MODE_LABELS = {
@@ -83,13 +92,14 @@ class SilhouetteCanvas(QWidget):
             return
         xs = [p[0] for p in self._outline]
         ys = [p[1] for p in self._outline]
-        w, h = max(xs) - min(xs), max(ys) - min(ys)
+        min_x, min_y = min(xs), min(ys)
+        w, h = max(xs) - min_x, max(ys) - min_y
         scale = min((self.width() - 40) / max(w, 1e-12),
                     (self.height() - 30) / max(h, 1e-12))
         path = QPainterPath()
         for i, (x, y) in enumerate(self._outline):
-            px = (x - min(xs) - w / 2) * scale + self.width() / 2
-            py = self.height() / 2 - (y - min(ys) - h / 2) * scale
+            px = (x - min_x - w / 2) * scale + self.width() / 2
+            py = self.height() / 2 - (y - min_y - h / 2) * scale
             if i == 0:
                 path.moveTo(QPointF(px, py))
             else:
@@ -121,6 +131,10 @@ class GeoQuestDockWidget(QDockWidget):
         self._saved_extent = None  # restored after blind_zoom
 
         self._active_modes: list[str] = []
+        # A loaded Quest Pack stays the quest source until the user picks a
+        # layer or starts from the builder; replay and export then reuse it.
+        self._pack_data: dict | None = None
+        self._value_label = "value"
         # Difficulty
         self._difficulty = "Medium"
 
@@ -139,6 +153,7 @@ class GeoQuestDockWidget(QDockWidget):
             Qt.DockWidgetArea.LeftDockWidgetArea | Qt.DockWidgetArea.RightDockWidgetArea)
         self.setMinimumWidth(380)
         self._build_ui()
+        self._install_shortcuts()
         self._on_layer_changed(self.layer_combo.currentLayer())
         self._refresh_texts()
 
@@ -300,10 +315,13 @@ class GeoQuestDockWidget(QDockWidget):
         self.distance_guess.setRange(0, 50_000)
         self.distance_guess.setSuffix(" km")
         self.distance_guess.setDecimals(1)
+        self.distance_guess.setGroupSeparatorShown(True)
+        self.distance_guess.setToolTip("Type your estimate, then press Enter or Submit")
         dist_v.addWidget(self.distance_guess, 1)
-        submit_dist = QPushButton("OK")
-        submit_dist.clicked.connect(self._submit_distance)
-        dist_v.addWidget(submit_dist)
+        self.distance_submit = QPushButton("Submit estimate")
+        self.distance_submit.setProperty("class", "primary")
+        self.distance_submit.clicked.connect(self._submit_distance)
+        dist_v.addWidget(self.distance_submit)
         self.input_stack.addWidget(dist_page)
 
         # Page 3: Attribute guess slider
@@ -562,6 +580,7 @@ class GeoQuestDockWidget(QDockWidget):
         profile_row = QHBoxLayout()
         self.profile_combo = QComboBox()
         self.profile_combo.setMinimumWidth(130)
+        self.profile_combo.currentIndexChanged.connect(self._profile_selected)
         profile_row.addWidget(QLabel("Active profile:"))
         profile_row.addWidget(self.profile_combo, 1)
         self.avatar_combo = QComboBox()
@@ -639,6 +658,7 @@ class GeoQuestDockWidget(QDockWidget):
     def _on_layer_changed(self, layer) -> None:
         self.label_field.setLayer(layer)
         self.value_field.setLayer(layer)
+        self._pack_data = None
         if layer is not None:
             self.quest_title.setEditText(f"{layer.name()} Quest")
             self.builder_status.setText(f"{layer.featureCount():,} features detected")
@@ -658,6 +678,7 @@ class GeoQuestDockWidget(QDockWidget):
     # ── Game lifecycle ────────────────────────────────────────────────────────
 
     def _prepare_records(self) -> bool:
+        """Snapshot the builder's layer(s) and choose the playable modes."""
         layer_a = self.layer_combo.currentLayer()
         modes = self._selected_modes()
         if layer_a is None or not modes:
@@ -665,61 +686,57 @@ class GeoQuestDockWidget(QDockWidget):
             return False
         label_a = self.label_field.currentField()
         value_a = self.value_field.currentField()
+        layer_b = self.layer_combo_b.currentLayer() if self.use_second_layer.isChecked() else None
+        value_b = self.value_field_b.currentField() if layer_b is not None else ""
         try:
-            if self.use_second_layer.isChecked():
-                layer_b = self.layer_combo_b.currentLayer()
-                if layer_b is not None:
-                    self.records = merge_layers(
-                        layer_a, label_a, value_a,
-                        layer_b,
-                        self.label_field_b.currentField(),
-                        self.value_field_b.currentField())
-                else:
-                    self.records = records_from_layer(layer_a, label_a, value_a)
+            if layer_b is not None:
+                records = merge_layers(
+                    layer_a, label_a, value_a,
+                    layer_b, self.label_field_b.currentField(), value_b)
             else:
-                self.records = records_from_layer(layer_a, label_a, value_a)
+                records = records_from_layer(layer_a, label_a, value_a)
         except Exception as exc:
             self.builder_status.setText(str(exc))
             return False
 
-        if len(self.records) < 4:
+        if len(records) < 4:
             self.builder_status.setText("At least four non-empty features are required.")
             return False
 
-        # Auto-filter modes that need conditions we can't meet
-        has_value = bool(value_a) or (
-            self.use_second_layer.isChecked() and bool(self.value_field_b.currentField()))
-        if not has_value:
-            removed = [m for m in modes if m in ("attr_guess", "ordering")]
-            if removed:
-                modes = [m for m in modes if m not in ("attr_guess", "ordering")]
-                self.builder_status.setText(
-                    "Attribute Guess and Ordering need a numeric field — skipped.")
-                if not modes:
-                    return False
+        names = [self._field_display_name(layer_a, value_a)]
+        if layer_b is not None:
+            names.append(self._field_display_name(layer_b, value_b))
+        names = list(dict.fromkeys(name for name in names if name))
+        self._value_label = names[0] if len(names) == 1 else "value"
 
-        if "silhouette" in modes:
-            poly_count = sum(1 for r in self.records if r.get("outline"))
-            if poly_count < 4:
-                modes.remove("silhouette")
-                self.builder_status.setText("Silhouette skipped: need 4+ polygon features.")
+        notes = []
+        source_count = layer_a.featureCount() + (
+            layer_b.featureCount() if layer_b is not None and layer_b.id() != layer_a.id() else 0)
+        if source_count > len(records):
+            notes.append(f"Sampled {len(records):,} of {source_count:,} features evenly.")
+        if not (value_a or value_b):
+            dropped = [MODE_LABELS[m] for m in modes if m in ("attr_guess", "ordering")]
+            if dropped:
+                notes.append(", ".join(dropped) + " need a numeric field — skipped.")
+            modes = [m for m in modes if m not in ("attr_guess", "ordering")]
+            if not modes:
+                self.builder_status.setText(" ".join(notes))
+                return False
 
-        if not modes:
-            return False
-
-        self.factory = QuestionFactory(self.records, seed=time.time_ns())
-        self._active_modes = self.factory.available_modes(modes)
-        if not self._active_modes:
+        factory = QuestionFactory(records, seed=time.time_ns(), value_label=self._value_label)
+        active = factory.available_modes(modes)
+        if not active:
             self.builder_status.setText(
-                "Selected modes need more suitable or more varied feature data.")
+                " ".join(notes + ["Selected modes need more suitable or more varied feature data."]))
             return False
-        if len(self._active_modes) != len(modes):
-            skipped = [MODE_LABELS[mode] for mode in modes if mode not in self._active_modes]
-            self.builder_status.setText("Skipped unavailable modes: " + ", ".join(skipped))
+        skipped = [MODE_LABELS[mode] for mode in modes if mode not in active]
+        if skipped:
+            notes.append("Skipped (not enough suitable data): " + ", ".join(skipped))
 
-        self.export_summary.setText(
-            f"{self.quest_title.currentText()} · {len(self.records)} features · "
-            f"{self.round_count.value()} rounds · {self._difficulty}")
+        self._pack_data = None
+        self.records, self.factory, self._active_modes = records, factory, active
+        self.builder_status.setText(" ".join(notes) or f"{len(records):,} features ready.")
+        self._update_export_summary()
         return True
 
     def start_game(self) -> None:
@@ -738,6 +755,7 @@ class GeoQuestDockWidget(QDockWidget):
             modes, self.round_count.value(), self.lives_count.value(),
             seed=time.time_ns(), difficulty=self._difficulty,
             joker_count=self.joker_count.value())
+        self._update_stats()
         self._show_page(0)
         self._next_question()
 
@@ -753,6 +771,7 @@ class GeoQuestDockWidget(QDockWidget):
         self.silhouette.hide()
         self.ordering_list.clear()
         self.input_stack.setCurrentIndex(0)
+        self._set_inputs_enabled(True)
         for jbtn in (self.joker_eliminate, self.joker_value, self.joker_map):
             jbtn.setEnabled(False)
         self.next_button.hide()
@@ -799,9 +818,14 @@ class GeoQuestDockWidget(QDockWidget):
             self.input_stack.setCurrentIndex(0)
             self.feedback.setText("Click the matching feature on the QGIS map.")
             self.feedback.setStyleSheet("color:#6c4cff;padding:4px")
+            repick = QPushButton("🎯 Pick on map")
+            repick.setToolTip("Re-activate the picking tool if you switched to pan or zoom")
+            repick.clicked.connect(self.locate_requested.emit)
+            self.answer_layout.addWidget(repick, 0, 0, 1, 2)
+            self._answer_buttons.append(repick)
             self.locate_requested.emit()
 
-        elif mode in ("bigger", "silhouette", "nearest", "blind_zoom"):
+        elif mode in ("bigger", "silhouette", "nearest", "blind_zoom", "direction"):
             self._show_choices(self.question["choices"])
             if mode == "silhouette":
                 self.silhouette.set_outline(self.question["outline"])
@@ -811,9 +835,17 @@ class GeoQuestDockWidget(QDockWidget):
 
         elif mode == "distance":
             self.input_stack.setCurrentIndex(2)
-            answer_km = float(self.question["answer"]) / 1000.0
-            self.distance_guess.setRange(0, max(10.0, answer_km * 3.0))
-            self.distance_guess.setValue(round(answer_km * 0.75, 1))
+            unit = self.question.get("unit", "km")
+            maximum = float(self.question.get("input_max", 50_000))
+            # Range and start value come from the whole quest, never from the
+            # answer — the old 0.75 × answer start value passed Easy and Medium.
+            self.distance_guess.setDecimals(0 if unit == "m" else 2)
+            self.distance_guess.setSuffix(f" {unit}")
+            self.distance_guess.setRange(0, maximum)
+            self.distance_guess.setSingleStep(max(maximum / 100.0, 0.01))
+            self.distance_guess.setValue(0)
+            self.distance_guess.setFocus()
+            self.distance_guess.selectAll()
 
         elif mode == "attr_guess":
             self.input_stack.setCurrentIndex(3)
@@ -834,8 +866,11 @@ class GeoQuestDockWidget(QDockWidget):
     def _show_choices(self, choices: list) -> None:
         self.input_stack.setCurrentIndex(0)
         for idx, choice in enumerate(choices):
-            btn = QPushButton(str(choice))
+            # "&" would become a keyboard mnemonic and vanish from the label.
+            btn = QPushButton(f"{idx + 1}  {str(choice).replace('&', '&&')}")
             btn.setProperty("class", "answer")
+            btn.setProperty("choice", str(choice))
+            btn.setToolTip(f"Press {idx + 1} to choose")
             btn.clicked.connect(lambda _=False, v=choice: self._submit_choice(v))
             self.answer_layout.addWidget(btn, idx // 2, idx % 2)
             self._answer_buttons.append(btn)
@@ -861,29 +896,17 @@ class GeoQuestDockWidget(QDockWidget):
         bbox = self.question.get("bbox_wgs84", [])
         if not bbox or len(bbox) < 4:
             return
-        self._saved_extent = self.canvas.extent()
-        try:
-            wgs84 = QgsCoordinateReferenceSystem("EPSG:4326")
-            canvas_crs = self.canvas.mapSettings().destinationCrs()
-            tr = QgsCoordinateTransform(wgs84, canvas_crs, QgsProject.instance())
-            xmin, ymin, xmax, ymax = float(bbox[0]), float(bbox[1]), float(bbox[2]), float(bbox[3])
-            # Add 20% buffer
-            dx = (xmax - xmin) * 0.20
-            dy = (ymax - ymin) * 0.20
-            sw = tr.transform(xmin - dx, ymin - dy)
-            ne = tr.transform(xmax + dx, ymax + dy)
-            self.canvas.setExtent(QgsRectangle(sw.x(), sw.y(), ne.x(), ne.y()))
-            self.canvas.refresh()
-        except Exception as exc:
-            _ = exc
+        xmin, ymin, xmax, ymax = (float(v) for v in bbox[:4])
+        # Points have an empty box; keep at least ~300 m of context around them.
+        pad_x = max((xmax - xmin) * 0.20, MIN_ZOOM_SPAN_DEG / 2)
+        pad_y = max((ymax - ymin) * 0.20, MIN_ZOOM_SPAN_DEG / 2)
+        self._set_canvas_extent_wgs84(xmin - pad_x, ymin - pad_y, xmax + pad_x, ymax + pad_y)
 
     def _restore_extent(self) -> None:
         if self._saved_extent is not None:
-            try:
+            with suppress(Exception):
                 self.canvas.setExtent(self._saved_extent)
                 self.canvas.refresh()
-            except Exception as exc:
-                _ = exc
             self._saved_extent = None
 
     # ── Countdown timer ───────────────────────────────────────────────────────
@@ -921,6 +944,8 @@ class GeoQuestDockWidget(QDockWidget):
     # ── Submissions ───────────────────────────────────────────────────────────
 
     def _submit_choice(self, value) -> None:
+        if not self.question or "choices" not in self.question:
+            return
         answer = str(self.question["answer"])
         detail = answer
         if self.question.get("mode") == "bigger":
@@ -929,20 +954,27 @@ class GeoQuestDockWidget(QDockWidget):
         self._score(str(value) == answer, detail)
 
     def _submit_distance(self) -> None:
-        truth = float(self.question["answer"]) / 1000.0
-        guess = float(self.distance_guess.value())
-        error = abs(guess - truth) / max(0.001, abs(truth))
+        if not self.question or self.question.get("mode") != "distance":
+            return
+        factor = float(self.question.get("unit_factor", 1000.0))
+        truth = float(self.question["answer"])
+        guess = float(self.distance_guess.value()) * factor
+        error = abs(guess - truth) / max(1e-9, abs(truth))
         tol = float(self.question.get("tolerance", 0.25))
-        self._score(error <= tol, f"{truth:,.1f} km",
+        self._score(error <= tol,
+                    f"Answer: {self._format_distance(truth)} · your estimate: "
+                    f"{self._format_distance(guess)}",
                     closeness=max(0.25, 1.0 - error))
 
     def _submit_attr_guess(self) -> None:
+        if not self.question or self.question.get("mode") != "attr_guess":
+            return
         actual = self._attr_slider_min + self.attr_slider.value() * self._attr_slider_scale
         truth = float(self.question["answer"])
         tol = float(self.question.get("tolerance", 0.25))
-        scale = float(self.question.get("tolerance_scale", max(1.0, abs(truth))))
+        scale = float(self.question.get("tolerance_scale") or max(1.0, abs(truth)))
         error = abs(actual - truth) / max(1e-9, scale)
-        self._score(error <= tol, f"{truth:,.2f}",
+        self._score(error <= tol, f"Answer: {truth:,.2f} · your guess: {actual:,.2f}",
                     closeness=max(0.25, 1.0 - error))
 
     def _on_ordering_rows_moved(self, _parent=None, _start=0, _end=0, _dest=None, _row=0) -> None:
@@ -1024,19 +1056,20 @@ class GeoQuestDockWidget(QDockWidget):
         canvas = self.iface.mapCanvas()
         tolerance = canvas.mapUnitsPerPixel() * 12.0
         layer_point, layer_tol = point, tolerance
-        try:
+        with suppress(Exception):
             settings = canvas.mapSettings()
             layer_point = settings.mapToLayerCoordinates(layer, point)
             edge = settings.mapToLayerCoordinates(
                 layer, type(point)(point.x() + tolerance, point.y()))
             layer_tol = math.hypot(edge.x() - layer_point.x(), edge.y() - layer_point.y())
-        except Exception as exc:
-            _ = exc
-        picked = feature_at_point(layer, layer_point, layer_tol)
+        # Every feature under (or within 12 px of) the click counts, so a
+        # target overlapped by another polygon is still found.
+        hits = features_at_point(layer, layer_point, layer_tol)
         target = int(self.question["target_fid"])
-        correct = picked == target
+        correct = target in hits
         self._highlight_feature(target, QColor("#15a66a") if correct else QColor("#e94f64"), layer_id)
-        self._score(correct, str(self.question["answer"]))
+        extra = "" if correct or hits else "Nothing was under the click."
+        self._score(correct, str(self.question["answer"]), extra_feedback=extra)
 
     # ── Scoring ───────────────────────────────────────────────────────────────
 
@@ -1053,17 +1086,20 @@ class GeoQuestDockWidget(QDockWidget):
         lead = self._t("correct") if correct else self._t("wrong")
         gained = f" +{result['gained']}" if result["gained"] else ""
         text = f"<span style='color:{color}'><b>{lead}{gained}</b></span>"
+        if result.get("timed_out") and not extra_feedback:
+            extra_feedback = "⏱ Time's up!"
         if extra_feedback:
-            text = f"<span style='color:{t['subtle']}'>{extra_feedback}</span> {text}"
-        text += f"<br>{answer}"
+            text = f"<span style='color:{t['subtle']}'>{html.escape(extra_feedback)}</span> {text}"
+        text += f"<br>{html.escape(str(answer))}"
         self.feedback.setText(text)
         self.feedback.setStyleSheet("")
 
-        # Disable all inputs
+        self._set_inputs_enabled(False)
+        answer_text = str(self.question.get("answer", "")) if self.question else ""
         for btn in self._answer_buttons:
-            btn.setEnabled(False)
-        self.ordering_submit.setEnabled(False)
-        self.attr_submit.setEnabled(False)
+            if btn.property("choice") == answer_text:
+                btn.setStyleSheet(
+                    f"border:2px solid {t['correct_color']};font-weight:800;")
         self.locate_finished.emit()
         for jbtn in (self.joker_eliminate, self.joker_value, self.joker_map):
             jbtn.setEnabled(False)
@@ -1071,6 +1107,7 @@ class GeoQuestDockWidget(QDockWidget):
         self.next_button.show()
         fin_text = self._t("finish") if result["finished"] else self._t("next")
         self.next_button.setText(fin_text + "  →")
+        self.next_button.setFocus()
         self._update_stats(result)
 
     def _update_stats(self, result: dict | None = None) -> None:
@@ -1102,16 +1139,14 @@ class GeoQuestDockWidget(QDockWidget):
         # Save to class profile if active
         if self._active_profile:
             name, avatar = self._active_profile
-            try:
+            with suppress(Exception):
                 self._profiles.save_session(
                     name, avatar, summary,
                     self.quest_title.currentText(), self._difficulty)
                 self._refresh_sessions()
-            except Exception as exc:
-                _ = exc
-        again = QPushButton("↻  " + self._t("start"))
+        again = QPushButton("↻  Play again")
         again.setProperty("class", "primary")
-        again.clicked.connect(self.start_game)
+        again.clicked.connect(self._play_again)
         self.answer_layout.addWidget(again, 0, 0, 1, 2)
         self._answer_buttons.append(again)
 
@@ -1122,72 +1157,67 @@ class GeoQuestDockWidget(QDockWidget):
             return
         joker = self.session.joker
         mode = self.question["mode"]
-        has_choices = mode in ("bigger", "silhouette", "nearest", "blind_zoom")
+        can_eliminate = (mode in ("bigger", "silhouette", "nearest", "blind_zoom", "direction")
+                         and Joker.can_eliminate(self.question.get("choices", []),
+                                                 self.question.get("answer")))
         has_value = mode in ("attr_guess", "distance")
         has_map = mode in ("locate", "blind_zoom")
-        self.joker_eliminate.setEnabled(has_choices and joker.available(joker.ELIMINATE))
+        self.joker_eliminate.setEnabled(can_eliminate and joker.available(joker.ELIMINATE))
         self.joker_value.setEnabled(has_value and joker.available(joker.VALUE_HINT))
         self.joker_map.setEnabled(has_map and joker.available(joker.MAP_HINT))
 
     def _use_eliminate_joker(self) -> None:
-        if not self.session or not self.question:
+        if not self.session or not self.question or not self.session.awaiting_answer:
             return
         joker = self.session.joker
-        choices = [btn.text() for btn in self._answer_buttons]
+        choices = [btn.property("choice") for btn in self._answer_buttons
+                   if btn.property("choice") is not None and btn.isVisible()]
         answer = str(self.question.get("answer", ""))
-        remaining = joker.eliminate(choices, answer)
-        remaining_set = set(remaining)
+        remaining = set(joker.eliminate(choices, answer))
         for btn in self._answer_buttons:
-            if btn.text() not in remaining_set:
+            if btn.property("choice") is not None and btn.property("choice") not in remaining:
                 btn.hide()
         self.joker_eliminate.setEnabled(False)
 
     def _use_value_joker(self) -> None:
-        if not self.session or not self.question:
+        if not self.session or not self.question or not self.session.awaiting_answer:
             return
         joker = self.session.joker
         mode = self.question["mode"]
+        truth = float(self.question["answer"])
         if mode == "attr_guess":
-            min_v = self._attr_slider_min
-            max_v = min_v + self._attr_slider_scale * 200
-            new_lo, new_hi = joker.narrow_range(min_v, max_v)
+            lo = self._attr_slider_min
+            hi = lo + self._attr_slider_scale * 200
+            new_lo, new_hi = joker.narrow_range(lo, hi, truth=truth)
             self._attr_slider_min = new_lo
             self._attr_slider_scale = (new_hi - new_lo) / 200.0
-            self.attr_range_hint.setText(
-                f"Narrowed: {new_lo:,.2f} – {new_hi:,.2f}")
+            self.attr_range_hint.setText(f"Narrowed: {new_lo:,.2f} – {new_hi:,.2f}")
             self._update_attr_label(self.attr_slider.value())
         elif mode == "distance":
-            cur = float(self.distance_guess.value())
-            lo = max(0, cur * 0.6)
-            hi = cur * 1.4
-            if joker.use(joker.VALUE_HINT):
-                self.distance_guess.setRange(lo, hi)
+            factor = float(self.question.get("unit_factor", 1000.0))
+            lo, hi = joker.narrow_range(0.0, self.distance_guess.maximum(), truth=truth / factor)
+            self.distance_guess.setRange(lo, hi)
+            self.distance_guess.setValue((lo + hi) / 2.0)
+            self.feedback.setText(
+                f"📊 The answer lies between {self._format_distance(lo * factor)} "
+                f"and {self._format_distance(hi * factor)}.")
         self.joker_value.setEnabled(False)
 
     def _use_map_joker(self) -> None:
-        if not self.session or not self.question:
+        if not self.session or not self.question or not self.session.awaiting_answer:
             return
         joker = self.session.joker
         bbox = self.question.get("target_bbox_wgs84") or self.question.get("bbox_wgs84", [])
-        if bbox and len(bbox) == 4 and joker.use(joker.MAP_HINT):
-            # Zoom to 2.5× the feature's bounding box (hint without pinpointing)
-            cx = (bbox[0] + bbox[2]) / 2
-            cy = (bbox[1] + bbox[3]) / 2
-            w = (bbox[2] - bbox[0]) * 2.5
-            h = (bbox[3] - bbox[1]) * 2.5
-            self._zoom_to_question_area.__func__  # reuse with wider bbox
-            try:
-                wgs84 = QgsCoordinateReferenceSystem("EPSG:4326")
-                canvas_crs = self.canvas.mapSettings().destinationCrs()
-                tr = QgsCoordinateTransform(wgs84, canvas_crs, QgsProject.instance())
-                sw = tr.transform(cx - w / 2, cy - h / 2)
-                ne = tr.transform(cx + w / 2, cy + h / 2)
-                if self._saved_extent is None:
-                    self._saved_extent = self.canvas.extent()
-                self.canvas.setExtent(QgsRectangle(sw.x(), sw.y(), ne.x(), ne.y()))
-                self.canvas.refresh()
-            except Exception as exc:
-                _ = exc
+        if bbox and len(bbox) >= 4 and joker.use(joker.MAP_HINT):
+            xmin, ymin, xmax, ymax = (float(v) for v in bbox[:4])
+            width = max(xmax - xmin, MIN_ZOOM_SPAN_DEG) * 4.0
+            height = max(ymax - ymin, MIN_ZOOM_SPAN_DEG) * 4.0
+            # Off-centre window: the target is inside, but not in the middle.
+            rng = self.session.rng
+            cx = (xmin + xmax) / 2 + (rng.uniform() - 0.5) * width * 0.5
+            cy = (ymin + ymax) / 2 + (rng.uniform() - 0.5) * height * 0.5
+            self._set_canvas_extent_wgs84(cx - width / 2, cy - height / 2,
+                                          cx + width / 2, cy + height / 2)
         self.joker_map.setEnabled(False)
 
     # ── Highlight ─────────────────────────────────────────────────────────────
@@ -1250,12 +1280,20 @@ class GeoQuestDockWidget(QDockWidget):
 
     # ── Class mode / profiles ─────────────────────────────────────────────────
 
-    def _refresh_profiles(self) -> None:
+    def _refresh_profiles(self, select: str | None = None) -> None:
+        """Rebuild the profile list, keeping (or moving to) the active profile."""
+        keep = select or (self._active_profile[0] if self._active_profile else None)
+        self.profile_combo.blockSignals(True)
         self.profile_combo.clear()
         self.profile_combo.addItem("— no profile —", None)
+        index = 0
         for p in self._profiles.load_profiles():
             self.profile_combo.addItem(f"{p.avatar} {p.name}", (p.name, p.avatar))
-        self.profile_combo.currentIndexChanged.connect(self._profile_selected)
+            if p.name == keep:
+                index = self.profile_combo.count() - 1
+        self.profile_combo.setCurrentIndex(index)
+        self.profile_combo.blockSignals(False)
+        self._profile_selected(index)
 
     def _profile_selected(self, idx: int) -> None:
         data = self.profile_combo.itemData(idx)
@@ -1268,7 +1306,7 @@ class GeoQuestDockWidget(QDockWidget):
             return
         try:
             self._profiles.add_profile(name, avatar)
-            self._refresh_profiles()
+            self._refresh_profiles(select=name)
             self.new_profile_name.clearEditText()
         except ValueError as exc:
             QMessageBox.warning(self, PLUGIN_TITLE, str(exc))
@@ -1314,7 +1352,7 @@ class GeoQuestDockWidget(QDockWidget):
     # ── HTML export ───────────────────────────────────────────────────────────
 
     def _export_html(self) -> None:
-        if not self._prepare_records():
+        if not self._ensure_quest_source():
             self._show_page(1)
             return
         web_modes = [mode for mode in self._active_modes if mode in HTML_MODES]
@@ -1323,7 +1361,8 @@ class GeoQuestDockWidget(QDockWidget):
             QMessageBox.warning(
                 self, PLUGIN_TITLE,
                 "Offline HTML supports Value Duel, Distance Guess, Know the Shape, "
-                "Attribute Guess, Ranking, and Nearest Neighbour. Map Hunt and Blind Zoom need QGIS.")
+                "Attribute Guess, Ranking, Nearest Neighbour and Compass Quest. "
+                "Map Hunt and Blind Zoom need QGIS.")
             return
         if skipped_modes:
             QMessageBox.information(
@@ -1340,7 +1379,9 @@ class GeoQuestDockWidget(QDockWidget):
             filename += ".html"
         try:
             write_html(filename, self.quest_title.currentText(),
-                       self.records, web_modes, self.round_count.value())
+                       self.records, web_modes, self.round_count.value(),
+                       difficulty=self._difficulty, lives=self.lives_count.value(),
+                       value_label=self._value_label)
         except ValueError as exc:
             QMessageBox.warning(self, PLUGIN_TITLE, str(exc))
             return
@@ -1351,18 +1392,25 @@ class GeoQuestDockWidget(QDockWidget):
             PLUGIN_TITLE, f"{self._t('exported')}: {filename}")
 
     def _export_certificate(self) -> None:
-        scores = self._scores()
-        if not scores:
-            QMessageBox.information(self, PLUGIN_TITLE, "Play and complete at least one quest first!")
-            return
-        best = scores[0]
-        player_name = "Master Explorer"
-        if getattr(self, "_active_profile", None):
-            player_name = f"{self._active_profile[1]} {self._active_profile[0]}"
-        html_content = generate_certificate_html(
-            best, player_name=player_name, quest_title=str(best.get("title", "Spatial Quest")))
+        best, quest, player_name = None, "Spatial Quest", "Master Explorer"
+        if self._active_profile:
+            name, avatar = self._active_profile
+            player_name = f"{avatar} {name}"
+            mine = [s for s in self._profiles.load_sessions() if s.get("player") == name]
+            if mine:
+                best = max(mine, key=lambda s: int(s.get("score", 0)))
+                quest = str(best.get("quest") or quest)
+        if best is None:
+            scores = self._scores()
+            if not scores:
+                QMessageBox.information(self, PLUGIN_TITLE, "Play and complete at least one quest first!")
+                return
+            best = scores[0]
+            quest = str(best.get("title") or quest)
+        html_content = generate_certificate_html(best, player_name=player_name, quest_title=quest)
+        safe_name = "".join(ch if ch.isalnum() else "_" for ch in player_name).strip("_") or "Explorer"
         filename, _ = QFileDialog.getSaveFileName(
-            self, "Save Certificate", f"GeoQuest_Certificate_{player_name.replace(' ', '_')}.html",
+            self, "Save Certificate", f"GeoQuest_Certificate_{safe_name}.html",
             "HTML Certificate (*.html)")
         if not filename:
             return
@@ -1377,7 +1425,7 @@ class GeoQuestDockWidget(QDockWidget):
             QMessageBox.critical(self, PLUGIN_TITLE, str(exc))
 
     def _export_quest_pack(self) -> None:
-        if not self._prepare_records():
+        if not self._ensure_quest_source():
             self._show_page(1)
             return
         filename, _ = QFileDialog.getSaveFileName(
@@ -1388,14 +1436,17 @@ class GeoQuestDockWidget(QDockWidget):
             return
         if not filename.lower().endswith(".json"):
             filename += ".geoquest.json"
+        description = (str(self._pack_data.get("description", "")) if self._pack_data
+                       else f"Exported from {self.layer_combo.currentText()}")
         try:
             export_pack(
                 filename,
                 title=self.quest_title.currentText(),
-                description=f"Exported from {self.layer_combo.currentText()}",
+                description=description,
                 records=self.records,
                 modes=self._active_modes,
                 difficulty=self._difficulty,
+                value_label=self._value_label,
             )
             self.iface.messageBar().pushSuccess(
                 PLUGIN_TITLE, f"Quest Pack saved: {filename}")
@@ -1420,14 +1471,16 @@ class GeoQuestDockWidget(QDockWidget):
             return
         self._apply_pack_data(pack_data)
 
-    def _apply_pack_data(self, pack_data: dict) -> None:
+    def _apply_pack_data(self, pack_data: dict, announce: bool = True) -> None:
         valid, message = validate_pack(pack_data)
         if not valid:
             raise ValueError(f"Invalid Quest Pack: {message}")
         title = str(pack_data.get("title", "Custom Quest"))
         self.quest_title.setCurrentText(title)
         self.records = list(pack_data.get("records", []))
-        self.factory = QuestionFactory(self.records, seed=time.time_ns())
+        self._value_label = str(pack_data.get("value_label") or "value")
+        self.factory = QuestionFactory(self.records, seed=time.time_ns(),
+                                       value_label=self._value_label)
         diff = str(pack_data.get("difficulty", "Medium"))
         if diff in self.diff_buttons:
             self._set_difficulty(diff)
@@ -1435,14 +1488,105 @@ class GeoQuestDockWidget(QDockWidget):
         for mode, check in self.mode_checks.items():
             check.setChecked(mode in modes)
         self._active_modes = self.factory.available_modes(modes)
-        self.export_summary.setText(
-            f"{title} · {len(self.records)} features · "
-            f"{self.round_count.value()} rounds · {self._difficulty}")
-        self.iface.messageBar().pushSuccess(
-            PLUGIN_TITLE, f"Loaded Quest Pack '{title}' ({len(self.records)} features)")
+        self._pack_data = pack_data
+        self._update_export_summary()
+        if announce:
+            source = pack_data.get("source")
+            self.iface.messageBar().pushSuccess(
+                PLUGIN_TITLE, f"Loaded Quest Pack '{title}' ({len(self.records)} features)"
+                + (f" · data: {source}" if source else ""))
         # Do not call start_game(): it prepares the currently selected QGIS
         # layer and would overwrite the imported pack records.
         self._launch_game()
+
+    def _field_display_name(self, layer, field_name: str) -> str:
+        """Return a field's alias (or name) for prompts such as 'greater population'."""
+        if layer is None or not field_name:
+            return ""
+        index = layer.fields().indexOf(field_name)
+        return layer.fields().at(index).displayName() if index >= 0 else field_name
+
+    def _update_export_summary(self) -> None:
+        source = "Quest Pack" if self._pack_data is not None else "layer snapshot"
+        self.export_summary.setText(
+            f"{self.quest_title.currentText()} · {len(self.records)} features ({source}) · "
+            f"{self.round_count.value()} rounds · {self._difficulty}")
+
+    def _play_again(self) -> None:
+        """Replay the same source: the loaded Quest Pack, or the builder's layer."""
+        if self._pack_data is not None:
+            self._apply_pack_data(self._pack_data, announce=False)
+        else:
+            self.start_game()
+
+    def _set_inputs_enabled(self, enabled: bool) -> None:
+        """Enable or lock every answer input. Scoring locks them; a new round unlocks."""
+        for widget in (self.ordering_submit, self.order_up_btn, self.order_down_btn,
+                       self.ordering_list, self.attr_submit, self.attr_slider,
+                       self.distance_submit, self.distance_guess):
+            widget.setEnabled(enabled)
+        for btn in self._answer_buttons:
+            btn.setEnabled(enabled)
+
+    def _set_canvas_extent_wgs84(self, xmin: float, ymin: float,
+                                 xmax: float, ymax: float) -> None:
+        """Zoom the canvas to a WGS84 box, remembering the extent to restore."""
+        if self._saved_extent is None:
+            self._saved_extent = self.canvas.extent()
+        with suppress(Exception):
+            transform = QgsCoordinateTransform(
+                QgsCoordinateReferenceSystem("EPSG:4326"),
+                self.canvas.mapSettings().destinationCrs(), QgsProject.instance())
+            self.canvas.setExtent(transform.transformBoundingBox(
+                QgsRectangle(xmin, ymin, xmax, ymax)))
+            self.canvas.refresh()
+
+    def _format_distance(self, metres: float) -> str:
+        unit = self.question.get("unit", "km") if self.question else "km"
+        factor = float(self.question.get("unit_factor", 1000.0)) if self.question else 1000.0
+        value = metres / factor
+        return f"{value:,.0f} {unit}" if unit == "m" or value >= 100 else f"{value:,.2f} {unit}"
+
+    def _install_shortcuts(self) -> None:
+        """Keys 1–9 pick an answer and Enter submits or continues while the dock has focus."""
+        self._shortcuts = []
+        for number in range(1, 10):
+            shortcut = QShortcut(QKeySequence(str(number)), self)
+            shortcut.setContext(Qt.ShortcutContext.WidgetWithChildrenShortcut)
+            shortcut.activated.connect(lambda n=number: self._press_choice(n))
+            self._shortcuts.append(shortcut)
+        for key in ("Return", "Enter"):
+            shortcut = QShortcut(QKeySequence(key), self)
+            shortcut.setContext(Qt.ShortcutContext.WidgetWithChildrenShortcut)
+            shortcut.activated.connect(self._press_enter)
+            self._shortcuts.append(shortcut)
+
+    def _press_choice(self, number: int) -> None:
+        if self.pages.currentIndex() != 0 or self.session is None or not self.session.awaiting_answer:
+            return
+        visible = [btn for btn in self._answer_buttons
+                   if btn.property("choice") is not None and btn.isVisible() and btn.isEnabled()]
+        if 0 < number <= len(visible):
+            visible[number - 1].click()
+
+    def _press_enter(self) -> None:
+        if self.pages.currentIndex() != 0:
+            return
+        if self.next_button.isVisible():
+            self.next_button.click()
+            return
+        if not self.question or self.session is None or not self.session.awaiting_answer:
+            return
+        submit = {"distance": self.distance_submit, "attr_guess": self.attr_submit,
+                  "ordering": self.ordering_submit}.get(self.question.get("mode"))
+        if submit is not None and submit.isEnabled():
+            submit.click()
+
+    def _ensure_quest_source(self) -> bool:
+        """Use the loaded Quest Pack if there is one, otherwise snapshot the layer."""
+        if self._pack_data is not None and self.records and self._active_modes:
+            return True
+        return self._prepare_records()
 
     # ── Cleanup ───────────────────────────────────────────────────────────────
 

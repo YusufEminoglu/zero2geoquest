@@ -20,8 +20,7 @@ icon=icons/icon.png
 experimental=False
 deprecated=False
 hasProcessingProvider=no
-license=GPL-3
-
+license=GPL-3.0-or-later
 changelog=
     1.3.0 - Fair, Answerable Rounds Everywhere:
         Fixed: Ranking and Attribute Guess could only be submitted once per QGIS session; later rounds were lost on the timer.

@@ -2,19 +2,21 @@
 name=02GeoQuest - Playable Map Studio
 qgisMinimumVersion=3.34
 qgisMaximumVersion=4.99
-description=Turn any vector layer into a polished geography game, classroom challenge or public-engagement quest.
+description=Turn any vector layer into a geography game for the classroom or public engagement: map hunts, value duels, distance guesses, silhouettes and compass quests, playable in QGIS or as offline HTML.
 version=1.3.0
 author=Geophilo
 email=yusuf.eminoglu@deu.edu.tr
 
-about=02GeoQuest transforms ordinary QGIS vector layers into playful, useful challenges. Play Map Hunt directly on the QGIS canvas, compare attribute values, estimate distances, recognise polygon silhouettes, and test geodetic bearings in Compass Quest. Build mixed quests, import/export Quest Packs, keep local scoreboards, generate printable Achievement Certificates, and export standalone privacy-friendly HTML games that run fully offline. No account, API key, server or pip dependency is required. Online User Manual & Documentation: https://geophilo.com/zero2geoquest/ | If you find this plugin helpful, please consider starring the repository on GitLab (https://gitlab.com/geophilo1/zero2geoquest)!
+about=02GeoQuest makes a quiz out of the layers you already have. Play Map Hunt directly on the QGIS canvas, compare attribute values in a duel, estimate distances, recognise polygon silhouettes and test bearings in Compass Quest, or mix them into one quest.
+    Share quests as Quest Packs, keep local scoreboards, print achievement certificates, and export a game as a single HTML file that runs offline in any browser. Students play without an account and nothing is uploaded, which makes it easy to use in schools and workshops. Starter packs use UN World Urbanization Prospects data.
+    Manual: https://geophilo.com/zero2geoquest/manual.html
 
 tracker=https://gitlab.com/geophilo1/zero2geoquest/-/issues
 repository=https://gitlab.com/geophilo1/zero2geoquest
 homepage=https://geophilo.com/zero2geoquest/
 
 category=Vector
-tags=game,education,quiz,geography,engagement,classroom,offline,html,planx
+tags=game,education,quiz,geography,engagement,classroom,offline,html,teaching,public participation,geophilo
 icon=icons/icon.png
 
 experimental=False
